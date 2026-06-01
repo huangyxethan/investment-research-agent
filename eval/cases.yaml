@@ -25,13 +25,15 @@
 - {id: meta_inception,class: meta,    mode: values,   question: "易方达蓝筹精选是什么时候成立的", expect: ["2018"]}
 
 # --- metric class: fragile before fact_fund_perf, should improve after ---
-- {id: met_ytd_all,   class: metric,  mode: values,   question: "所有基金今年以来的收益率排名", expect: ["兴全合润"]}
-- {id: met_ytd_para,  class: metric,  mode: values,   question: "今年以来哪只基金涨得最多",     expect: ["兴全合润"]}
+# ranking ground-truth refreshed for the ~149-fund universe (re-derived from
+# v_fund_perf_latest, not guessed — keeps the oracle honest as data scales).
+- {id: met_ytd_all,   class: metric,  mode: values,   question: "所有基金今年以来的收益率排名", expect: ["华商均衡成长"]}
+- {id: met_ytd_para,  class: metric,  mode: values,   question: "今年以来哪只基金涨得最多",     expect: ["华商均衡成长"]}
 - {id: met_ytd_worst, class: metric,  mode: values,   question: "今年跌得最惨的是哪只基金",     expect: ["易方达消费"]}
 # value-checked against the verified fact_fund_perf (true 口径), so a wrong
 # but non-empty answer (e.g. the 283.6% since-inception bug) correctly FAILS.
 - {id: met_since_inc, class: metric,  mode: values,   question: "易方达蓝筹精选成立以来的累计收益率是多少", expect: ["0.60"]}
 - {id: met_1y,        class: metric,  mode: nonempty, question: "华夏成长最近一年的收益率"}
 - {id: met_dd,        class: metric,  mode: values,   question: "兴全合润成立以来的最大回撤是多少", expect: ["0.47"]}
-- {id: met_sharpe,    class: metric,  mode: values,   question: "成立以来夏普比率最高的三只基金", expect: ["兴全合润"]}
+- {id: met_sharpe,    class: metric,  mode: values,   question: "成立以来夏普比率最高的三只基金", expect: ["永赢科技智选"]}
 - {id: met_vol,       class: metric,  mode: nonempty, question: "成立以来波动率最低的基金是哪只"}

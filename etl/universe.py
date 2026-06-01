@@ -1,11 +1,17 @@
 """
-W3 demo fund universe — a small, style-diverse set of well-known active funds
-(famous managers) chosen so the hero-chart demos have good subjects. Flexible
-target (blueprint §13: clean-and-small beats large-and-dirty). Edit freely.
+Fund universe = curated HERO funds (famous managers, for hero-chart demos)
+UNION an auto-pulled broader set persisted in fund_universe.csv (built by
+etl/build_universe.py). All ETL reads CODES, so the universe scales by
+regenerating the CSV — no code edits needed.
 """
+from __future__ import annotations
 
-# fund_code -> short label (manager / style) for our own reference
-UNIVERSE = {
+import csv
+import pathlib
+
+# Curated, style-diverse, famous-manager funds — guaranteed in the universe so
+# the demos always have good subjects.
+HERO = {
     "005827": "易方达蓝筹精选 (张坤·消费/价值)",
     "110011": "易方达优质精选 (张坤)",
     "110022": "易方达消费行业 (萧楠·消费)",
@@ -20,4 +26,19 @@ UNIVERSE = {
     "000001": "华夏成长 (老牌混合)",
 }
 
+_CSV = pathlib.Path(__file__).parent / "fund_universe.csv"
+
+
+def _load_universe() -> dict[str, str]:
+    codes: dict[str, str] = dict(HERO)
+    if _CSV.exists():
+        with _CSV.open(encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                code = (row.get("fund_code") or "").strip()
+                if code:
+                    codes.setdefault(code, (row.get("fund_name") or "").strip())
+    return codes
+
+
+UNIVERSE = _load_universe()
 CODES = list(UNIVERSE)
