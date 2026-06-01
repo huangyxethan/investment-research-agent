@@ -1,0 +1,31 @@
+# Walking-skeleton compose: only Postgres+pgvector is active for W1.
+# schema.sql auto-applies on first boot via /docker-entrypoint-initdb.d.
+# The dagster / agent-api / frontend services are added in W2+ once their
+# Dockerfiles are real (kept out now so `docker compose up` works clean).
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: invest_pg
+    environment:
+      POSTGRES_DB: ${PG_DB:-invest}
+      POSTGRES_USER: ${PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-change_me_local_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres} -d ${PG_DB:-invest}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --- added in W2+ ---
+  # dagster:    { build: ./etl,   depends_on: { postgres: { condition: service_healthy } } }
+  # agent-api:  { build: ./agent, depends_on: { postgres: { condition: service_healthy } } }
+  # frontend:   { build: ./web,   ports: ["8501:8501"], depends_on: [agent-api] }
+
+volumes:
+  pgdata: {}

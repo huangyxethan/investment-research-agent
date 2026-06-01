@@ -1,0 +1,33 @@
+# Secrets
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Data / caches
+data/
+*.parquet
+*.duckdb
+akshare_cache/
+.dagster/
+
+# Models (bge embedding weights)
+models/
+*.bin
+*.safetensors
+
+# Claude Code local (machine-specific permissions)
+.claude/settings.local.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

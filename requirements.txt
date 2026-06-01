@@ -1,0 +1,35 @@
+# --- Data sources ---
+akshare
+mootdx
+
+# --- Storage / DB ---
+psycopg[binary]
+SQLAlchemy
+pgvector
+pandas
+numpy
+
+# --- NL2SQL agent ---
+vanna
+anthropic
+openai            # DeepSeek via OpenAI-compatible API
+
+# --- Embedding (local, CPU) ---
+sentence-transformers   # serves bge-large-zh-v1.5
+
+# --- SQL safety / viz ---
+sqlglot
+jsonschema
+plotly
+jinja2
+jsonpatch
+
+# --- ETL orchestration ---
+dagster
+dagster-webserver
+
+# --- Frontend ---
+streamlit
+
+# NOTE: Python 3.13 detected. If any wheel (torch/sentence-transformers)
+# is unavailable for 3.13, fall back to a 3.11 venv for the agent service.
