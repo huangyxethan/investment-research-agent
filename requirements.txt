@@ -24,6 +24,7 @@ jsonschema
 plotly
 jinja2
 jsonpatch
+pyyaml             # eval cases
 
 # --- ETL orchestration ---
 dagster

@@ -1,0 +1,37 @@
+# NL2SQL evaluation set (blueprint §15). The yardstick for generalization:
+# deliberately includes PARAPHRASES and held-out variations of the same intent,
+# so a rising score means the agent generalizes — not that we memorised prompts.
+#
+# modes:
+#   nonempty  -> generated SQL executes and returns >=1 row
+#   rowcount  -> exact number of rows
+#   values    -> every string in `expect` appears somewhere in the result
+#
+# class tags group results so we can see WHICH capability is weak.
+
+- {id: nav_trend_1,   class: nav,     mode: nonempty, question: "易方达蓝筹精选今年的单位净值走势"}
+- {id: nav_trend_2,   class: nav,     mode: nonempty, question: "兴全合润成立以来的净值表现"}
+- {id: nav_compare,   class: nav,     mode: nonempty, question: "对比易方达蓝筹精选和华夏成长今年的净值走势"}
+
+- {id: mgr_funds_1,   class: manager, mode: values,   question: "张坤管理了哪些基金",      expect: ["蓝筹", "优质精选"]}
+- {id: mgr_funds_2,   class: manager, mode: values,   question: "葛兰目前管的基金有哪些",    expect: ["中欧医疗"]}
+- {id: mgr_of_fund,   class: manager, mode: values,   question: "中欧医疗健康的基金经理是谁", expect: ["葛兰"]}
+
+- {id: hold_top_1,    class: holding, mode: values,   question: "易方达蓝筹精选2025年报的前十大重仓股", expect: ["贵州茅台"]}
+- {id: hold_top_2,    class: holding, mode: nonempty, question: "萧楠管理的易方达消费行业最新重仓了哪些股票"}
+- {id: hold_count,    class: holding, mode: nonempty, question: "易方达蓝筹精选最新一期全部持仓有多少只股票"}
+
+- {id: meta_type,     class: meta,    mode: values,   question: "各类型基金各有多少只",   expect: ["混合型"]}
+- {id: meta_inception,class: meta,    mode: values,   question: "易方达蓝筹精选是什么时候成立的", expect: ["2018"]}
+
+# --- metric class: fragile before fact_fund_perf, should improve after ---
+- {id: met_ytd_all,   class: metric,  mode: values,   question: "所有基金今年以来的收益率排名", expect: ["兴全合润"]}
+- {id: met_ytd_para,  class: metric,  mode: values,   question: "今年以来哪只基金涨得最多",     expect: ["兴全合润"]}
+- {id: met_ytd_worst, class: metric,  mode: values,   question: "今年跌得最惨的是哪只基金",     expect: ["易方达消费"]}
+# value-checked against the verified fact_fund_perf (true 口径), so a wrong
+# but non-empty answer (e.g. the 283.6% since-inception bug) correctly FAILS.
+- {id: met_since_inc, class: metric,  mode: values,   question: "易方达蓝筹精选成立以来的累计收益率是多少", expect: ["0.60"]}
+- {id: met_1y,        class: metric,  mode: nonempty, question: "华夏成长最近一年的收益率"}
+- {id: met_dd,        class: metric,  mode: values,   question: "兴全合润成立以来的最大回撤是多少", expect: ["0.47"]}
+- {id: met_sharpe,    class: metric,  mode: values,   question: "成立以来夏普比率最高的三只基金", expect: ["兴全合润"]}
+- {id: met_vol,       class: metric,  mode: nonempty, question: "成立以来波动率最低的基金是哪只"}

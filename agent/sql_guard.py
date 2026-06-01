@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlglot
 from sqlglot import exp
 
-ALLOWED_PREFIXES = ("dim_", "fact_", "bridge_")
+ALLOWED_PREFIXES = ("dim_", "fact_", "bridge_", "v_")  # v_ = semantic-layer views
 DEFAULT_LIMIT = 10_000
 
 

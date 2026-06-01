@@ -25,7 +25,15 @@ from .sql_guard import guard
 load_dotenv()
 
 # Tables exposed to the skeleton. Expand as ETL fills more (or hand to Vanna).
-CONTEXT_TABLES = ("dim_fund", "fact_nav")
+CONTEXT_TABLES = (
+    "dim_fund",
+    "dim_manager",
+    "bridge_fund_manager",
+    "fact_nav",
+    "v_fund_perf_latest",
+    "fact_holding",
+    "dim_security",
+)
 TODAY = dt.date(2026, 6, 1)  # blueprint demo "current date"
 
 
@@ -73,7 +81,13 @@ _SQL_SYS = """你是一个面向中国公募基金数据库的 PostgreSQL SQL �
 - 只输出一条 SELECT 语句，不要 markdown、不要解释、不要代码围栏。
 - 严格使用给定 schema 中的表名和列名。
 - 基金名称在 dim_fund.fund_name，净值在 fact_nav，按 fund_code 关联。
+- 基金/股票名称一律用模糊匹配 `fund_name LIKE '%关键词%'`：用户常用简称，而库里存的是全称（如"易方达蓝筹精选混合"）。经理名 dim_manager.manager_name 用精确匹配即可。
+- 全持仓分析（如重仓股、行业、Brinson）只用 fact_holding.is_full_holding = TRUE（中报/年报全持仓）。
+- 业绩指标（收益率/年化/夏普/最大回撤/波动率/按业绩排名）一律查视图 v_fund_perf_latest，按 period 选区间（YTD/1Y/3Y/SI），**不要用 fact_nav 现算，也不要按日期过滤**。
 - 日期格式 'YYYY-MM-DD'。今天是 {today}。"今年"指 nav_date >= '{year}-01-01'。
+- 净值表没有非交易日的行（元旦、周末等），**切勿假设某个确切日期存在并用等值连接**。
+  计算区间收益时：「年初/期初」取区间内最早交易日的净值，「最新/当前」取 MAX(nav_date) 的净值；
+  优先用窗口函数或 DISTINCT ON。YTD 收益率 = 最新累计净值 / 年初首个交易日累计净值 - 1。
 - 时间序列按 nav_date 升序排序。
 
 Schema:

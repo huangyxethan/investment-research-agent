@@ -194,7 +194,29 @@ CREATE TABLE IF NOT EXISTS fact_fund_perf (
     PRIMARY KEY (workspace_id, fund_code, period, as_of_date),
     FOREIGN KEY (workspace_id, fund_code) REFERENCES dim_fund (workspace_id, fund_code)
 );
-COMMENT ON TABLE fact_fund_perf IS '基金业绩指标（预计算）：收益、夏普、最大回撤、波动率';
+COMMENT ON TABLE  fact_fund_perf               IS '基金业绩指标（预计算，权威口径）：收益率/夏普/最大回撤/波动率。指标类问题应查本表，勿用 fact_nav 现算';
+COMMENT ON COLUMN fact_fund_perf.period        IS '区间：YTD(今年以来) / 1Y(近一年) / 3Y(近三年) / SI(成立以来)';
+COMMENT ON COLUMN fact_fund_perf.total_return  IS '区间累计收益率（小数，0.60=60%），基于累计净值';
+COMMENT ON COLUMN fact_fund_perf.annual_return IS '年化收益率（小数）';
+COMMENT ON COLUMN fact_fund_perf.sharpe        IS '夏普比率（年化，无风险利率取0）';
+COMMENT ON COLUMN fact_fund_perf.max_drawdown  IS '最大回撤（正数，0.48 表示回撤 48%）';
+COMMENT ON COLUMN fact_fund_perf.volatility    IS '年化波动率（小数）';
+
+-- Semantic-layer view: the clean surface the agent queries for metrics. It has
+-- already picked the latest as_of per (fund, period), so there is NO date column
+-- to mis-filter — removing a whole class of NL2SQL date-guessing errors.
+CREATE OR REPLACE VIEW v_fund_perf_latest AS
+SELECT p.fund_code, p.period, p.total_return, p.annual_return, p.sharpe,
+       p.max_drawdown, p.volatility
+FROM fact_fund_perf p
+WHERE p.as_of_date = (
+    SELECT MAX(p2.as_of_date) FROM fact_fund_perf p2
+    WHERE p2.fund_code = p.fund_code AND p2.period = p.period
+);
+COMMENT ON VIEW   v_fund_perf_latest IS '基金最新业绩指标（每基金每区间一行，已取最新交易日；查询无需也不应按日期过滤）。所有收益率/夏普/回撤/波动率/业绩排名问题查本视图';
+COMMENT ON COLUMN v_fund_perf_latest.period       IS '区间：YTD(今年以来)/1Y(近一年)/3Y(近三年)/SI(成立以来)';
+COMMENT ON COLUMN v_fund_perf_latest.total_return IS '区间累计收益率（小数，0.60=60%）';
+COMMENT ON COLUMN v_fund_perf_latest.max_drawdown IS '最大回撤（正数，0.48=回撤48%）';
 
 -- =====================================================================
 -- 3. EQUITY ANALYTICS (HOT-PATH PRE-COMPUTED)
