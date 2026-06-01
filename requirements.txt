@@ -8,6 +8,7 @@ SQLAlchemy
 pgvector
 pandas
 numpy
+python-dotenv      # .env loading for ETL/agent
 
 # --- NL2SQL agent ---
 vanna
