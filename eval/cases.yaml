@@ -47,3 +47,8 @@
 - {id: sw_alloc,    class: industry, mode: values,   question: "易方达蓝筹精选最新一期的行业配置分布",        expect: ["食品饮料"]}
 - {id: sw_filter,   class: industry, mode: values,   question: "易方达蓝筹精选最新全持仓里属于食品饮料行业的股票", expect: ["贵州茅台"]}
 - {id: sw_funds_in, class: industry, mode: nonempty, question: "有哪些基金重仓了银行股"}
+# time-series industry allocation — must span MULTIPLE report_dates (route to
+# v_fund_industry_alloc, NOT latest-only v_fund_holding_latest). The "2024" in
+# expect fails any answer that collapsed to the latest single snapshot.
+- {id: sw_ts_alloc, class: industry, mode: values, question: "易方达蓝筹精选近三年各申万行业绝对仓位的变化",   expect: ["食品饮料", "2024"]}
+- {id: sw_ts_para,  class: industry, mode: values, question: "易方达蓝筹精选历年各行业仓位的演变趋势",       expect: ["食品饮料", "2024"]}

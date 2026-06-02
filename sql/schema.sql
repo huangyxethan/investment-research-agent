@@ -206,35 +206,60 @@ COMMENT ON COLUMN fact_fund_perf.volatility    IS '年化波动率（小数）';
 -- already picked the latest as_of per (fund, period), so there is NO date column
 -- to mis-filter — removing a whole class of NL2SQL date-guessing errors.
 CREATE OR REPLACE VIEW v_fund_perf_latest AS
-SELECT p.fund_code, p.period, p.total_return, p.annual_return, p.sharpe,
-       p.max_drawdown, p.volatility
+SELECT p.fund_code, d.fund_name, p.period, p.total_return, p.annual_return,
+       p.sharpe, p.max_drawdown, p.volatility
 FROM fact_fund_perf p
+JOIN dim_fund d ON p.fund_code = d.fund_code
 WHERE p.as_of_date = (
     SELECT MAX(p2.as_of_date) FROM fact_fund_perf p2
     WHERE p2.fund_code = p.fund_code AND p2.period = p.period
 );
-COMMENT ON VIEW   v_fund_perf_latest IS '基金最新业绩指标（每基金每区间一行，已取最新交易日；查询无需也不应按日期过滤）。所有收益率/夏普/回撤/波动率/业绩排名问题查本视图';
+COMMENT ON VIEW   v_fund_perf_latest IS '基金最新业绩指标（每基金每区间一行，已含 fund_name，已取最新交易日；查询无需也不应按日期过滤，也无需再 join dim_fund）。所有收益率/夏普/回撤/波动率/业绩排名问题查本视图';
+COMMENT ON COLUMN v_fund_perf_latest.fund_name    IS '基金名称；"哪只基金/排名/展示"类结果请选此列（而非只给 fund_code，否则结果不可读）';
 COMMENT ON COLUMN v_fund_perf_latest.period       IS '区间：YTD(今年以来)/1Y(近一年)/3Y(近三年)/SI(成立以来)';
 COMMENT ON COLUMN v_fund_perf_latest.total_return IS '区间累计收益率（小数，0.60=60%）';
 COMMENT ON COLUMN v_fund_perf_latest.max_drawdown IS '最大回撤（正数，0.48=回撤48%）';
 
--- Semantic-layer view: each fund's LATEST full-holding snapshot (半年报/年报),
--- with 证券名称 + 申万一级行业 already joined in. Picks MAX(report_date) per fund
--- so cross-period double-counting (SUM over 2022..2025) is impossible — the same
--- class of fix as v_fund_perf_latest, for the holdings side.
-CREATE OR REPLACE VIEW v_fund_holding_latest AS
-SELECT h.fund_code, h.report_date, h.sec_code, s.sec_name, s.industry_l1,
-       h.weight, h.market_value, h.shares
+-- Two complementary holding surfaces, clean separation of duties:
+--   v_fund_holding_latest  = INDIVIDUAL STOCKS in each fund's latest snapshot
+--   v_fund_industry_alloc  = INDUSTRY-level weights (all periods + is_latest flag)
+-- v_fund_holding_latest: latest full-holding snapshot, one row per STOCK.
+DROP VIEW IF EXISTS v_fund_holding_latest;
+CREATE VIEW v_fund_holding_latest AS
+SELECT h.fund_code, d.fund_name, h.report_date, h.sec_code, s.sec_name,
+       s.industry_l1, h.weight, h.market_value, h.shares
 FROM fact_holding h
 JOIN (
     SELECT fund_code, MAX(report_date) AS rd
     FROM fact_holding WHERE is_full_holding GROUP BY fund_code
 ) m ON h.fund_code = m.fund_code AND h.report_date = m.rd
+JOIN dim_fund d ON h.fund_code = d.fund_code
 LEFT JOIN dim_security s ON h.sec_code = s.sec_code
 WHERE h.is_full_holding;
-COMMENT ON VIEW   v_fund_holding_latest IS '每只基金最新一期全持仓快照（已并入证券名称 sec_name 与申万一级行业 industry_l1）。回答"最新/当前持仓、行业配置分布、某行业重仓占比、个股下钻"一律查本视图（已取最新报告期，切勿跨期 SUM）；仅当用户指定具体报告期（如"2025年报"）时才查 fact_holding。';
-COMMENT ON COLUMN v_fund_holding_latest.weight      IS '个股占基金净值比例（小数，0.05=5%）；按行业汇总即配置占比';
-COMMENT ON COLUMN v_fund_holding_latest.industry_l1 IS '申万一级行业；用 LIKE ''%关键词%'' 容忍简称（医药->医药生物）；NULL=港股/北交所/退市标的';
+COMMENT ON VIEW   v_fund_holding_latest IS '每只基金【最新一期】全持仓的【个股】明细（含 fund_name、sec_name、申万行业 industry_l1、个股 weight）。回答"最新重仓股/前N大/某基金持有哪些股票/某行业里持有哪些个股(个股下钻)"用本视图。行业【层面】的配置/占比/排名/时序请改用 v_fund_industry_alloc（不要在本视图臆造 industry_weight 列）。指定具体报告期（如"2025年报"）才查 fact_holding。';
+COMMENT ON COLUMN v_fund_holding_latest.weight      IS '该个股占基金净值比例（小数，0.05=5%）';
+COMMENT ON COLUMN v_fund_holding_latest.industry_l1 IS '所属申万一级行业；用 LIKE ''%关键词%'' 容忍简称（医药->医药生物）；NULL=港股/北交所/退市标的';
+
+-- v_fund_industry_alloc: the single INDUSTRY-level surface. Per (fund, report_date,
+-- industry) summed weight across full holdings, with an is_latest flag so the SAME
+-- view serves both the time series (no filter) and the latest cross-section / ranking
+-- (WHERE is_latest) — no correlated subquery needed. Also feeds Brinson.
+DROP VIEW IF EXISTS v_fund_industry_alloc;
+CREATE VIEW v_fund_industry_alloc AS
+SELECT a.fund_code, a.fund_name, a.report_date, a.industry_l1, a.industry_weight,
+       (a.report_date = MAX(a.report_date) OVER (PARTITION BY a.fund_code)) AS is_latest
+FROM (
+    SELECT h.fund_code, d.fund_name, h.report_date, s.industry_l1,
+           SUM(h.weight) AS industry_weight
+    FROM fact_holding h
+    JOIN dim_fund d ON h.fund_code = d.fund_code
+    JOIN dim_security s ON h.sec_code = s.sec_code
+    WHERE h.is_full_holding AND s.industry_l1 IS NOT NULL
+    GROUP BY h.fund_code, d.fund_name, h.report_date, s.industry_l1
+) a;
+COMMENT ON VIEW   v_fund_industry_alloc IS '基金各报告期（半年报/年报全持仓）的申万一级行业配置，每(基金,报告期,行业)一行。时间轴是 report_date（本视图【没有 period 列】，"近N年/某年以来"一律用 report_date 过滤，如 report_date>=''2023-06-01''，切勿写 period=''3Y''）。问"行业仓位随时间变化/趋势/历史/演变/近N年/堆叠折线|面积图"→不加 is_latest（时间序列）；问"最新行业配置分布/某行业占比最高/行业排名"→加 WHERE is_latest（只取每只基金最新一期，无需相关子查询）。已排除未归类标的（港股通/北交所），故各期行业权重之和≤股票总仓位。';
+COMMENT ON COLUMN v_fund_industry_alloc.is_latest      IS '该行是否为所属基金的最新一期全持仓；看最新截面/排名加 WHERE is_latest，看时序则不加';
+COMMENT ON COLUMN v_fund_industry_alloc.industry_weight IS '该报告期内该申万一级行业的占净值比例之和（小数，0.38=38%），即绝对仓位；如需相对占比再按报告期归一化';
 
 -- =====================================================================
 -- 3. EQUITY ANALYTICS (HOT-PATH PRE-COMPUTED)

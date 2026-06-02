@@ -1,48 +1,53 @@
 # Core-ring Q-SQL pairs — 申万一级行业 (blueprint §6.2).
 #
 # ANTI-POISONING: every SQL below was executed against the live DB and its
-# result inspected before commit (中欧医疗 ~93% in 医药生物; 蓝筹 top industry
-# 食品饮料; 蓝筹 食品饮料 holdings led by 贵州茅台). These are the verified
-# exemplars the §15 industry eval cases (sw_*) are derived from.
+# result inspected before commit (中欧医疗 ~93% in 医药生物; 蓝筹 latest top
+# industry 食品饮料 led by 贵州茅台; 蓝筹 time series back to 2022-06).
 #
-# NOTE: the Vanna retriever is not wired yet (W5). This file seeds the Core ring
-# so retrieval has gold to imitate the moment it comes online. Until then, the
-# agent generalizes on these intents via the COMMENTs on v_fund_holding_latest.
+# NOTE: the Vanna retriever is not wired yet (W5). This seeds the Core ring so
+# retrieval has gold to imitate; until then the agent generalizes via the view
+# COMMENTs.
 #
-# 口径: questions about a fund's CURRENT/latest portfolio, industry allocation,
-# or sector over/under-weight go through v_fund_holding_latest — it has already
-# picked each fund's latest full-holding snapshot (no cross-period SUM) and
-# pre-joined sec_name + 申万 industry. industry name uses LIKE for 简称 tolerance.
+# 口径 / surface routing:
+#   v_fund_industry_alloc = INDUSTRY-level weights, all report dates + is_latest.
+#       latest ranking / latest allocation → WHERE is_latest
+#       time series (趋势/历史/近N年/堆叠图) → no is_latest filter
+#   v_fund_holding_latest = INDIVIDUAL STOCKS in the latest snapshot (个股下钻).
+#   industry name uses LIKE for 简称 tolerance (医药 -> 医药生物).
 
 - id: sw_fund_top_in_industry
   question: 重仓医药生物行业最多的基金是哪只
   sql: |
-    SELECT f.fund_name, ROUND(SUM(v.weight)::numeric, 4) AS industry_weight
-    FROM v_fund_holding_latest v
-    JOIN dim_fund f ON v.fund_code = f.fund_code
-    WHERE v.industry_l1 LIKE '%医药生物%'
-    GROUP BY f.fund_name
+    SELECT fund_name, ROUND(industry_weight::numeric, 4) AS industry_weight
+    FROM v_fund_industry_alloc
+    WHERE industry_l1 LIKE '%医药生物%' AND is_latest
     ORDER BY industry_weight DESC
     LIMIT 10;
-  note: 按目标行业在最新全持仓中的权重之和降序；视图已防跨期重复计算。
+  note: 最新一期各基金该行业权重排名；is_latest 取每只基金最新报告期，免相关子查询。
 
 - id: sw_fund_industry_allocation
   question: 易方达蓝筹精选最新一期的行业配置分布
   sql: |
-    SELECT v.industry_l1, ROUND(SUM(v.weight)::numeric, 4) AS industry_weight
-    FROM v_fund_holding_latest v
-    JOIN dim_fund f ON v.fund_code = f.fund_code
-    WHERE f.fund_name LIKE '%易方达蓝筹精选%'
-    GROUP BY v.industry_l1
+    SELECT industry_l1, ROUND(industry_weight::numeric, 4) AS industry_weight
+    FROM v_fund_industry_alloc
+    WHERE fund_name LIKE '%易方达蓝筹精选%' AND is_latest
     ORDER BY industry_weight DESC;
-  note: industry_l1 为 NULL 的一档是未归类标的（港股通/北交所），保留以反映真实敞口。
+  note: 单基金最新截面的行业占比；未归类标的（港股/北交所）已排除。
+
+- id: sw_fund_industry_timeseries
+  question: 易方达蓝筹精选近三年各申万行业绝对仓位的变化（堆叠图）
+  sql: |
+    SELECT report_date, industry_l1, ROUND(industry_weight::numeric, 4) AS industry_weight
+    FROM v_fund_industry_alloc
+    WHERE fund_name LIKE '%易方达蓝筹精选%' AND report_date >= '2023-06-01'
+    ORDER BY report_date, industry_l1;
+  note: 时间序列→不加 is_latest；长表 (report_date, industry_l1, weight) 喂堆叠面积图。
 
 - id: sw_fund_holdings_in_industry
   question: 易方达蓝筹精选最新全持仓里属于食品饮料行业的股票
   sql: |
-    SELECT v.sec_name, v.sec_code, ROUND(v.weight::numeric, 4) AS weight
-    FROM v_fund_holding_latest v
-    JOIN dim_fund f ON v.fund_code = f.fund_code
-    WHERE f.fund_name LIKE '%易方达蓝筹精选%' AND v.industry_l1 LIKE '%食品饮料%'
+    SELECT sec_name, sec_code, ROUND(weight::numeric, 4) AS weight
+    FROM v_fund_holding_latest
+    WHERE fund_name LIKE '%易方达蓝筹精选%' AND industry_l1 LIKE '%食品饮料%'
     ORDER BY weight DESC;
-  note: 个基 × 行业的个股下钻；与配置分布同源（同一视图）。
+  note: 个股下钻用个股视图 v_fund_holding_latest（勿在此视图臆造 industry_weight）。

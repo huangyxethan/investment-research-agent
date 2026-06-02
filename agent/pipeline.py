@@ -32,6 +32,7 @@ CONTEXT_TABLES = (
     "fact_nav",
     "v_fund_perf_latest",
     "v_fund_holding_latest",
+    "v_fund_industry_alloc",
     "fact_holding",
     "dim_security",
 )
@@ -142,22 +143,59 @@ def narrate(question: str, df: pd.DataFrame, llm: LLMClient) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# chart (deterministic; LLM-spec/Tier-3 is W6)
+# chart — deterministic Tier-2 generic renderer (Tier-3 LLM-spec author is W6).
+#
+# Infers chart structure from the data SHAPE, not from hardcoded column names.
+# This generalises one class at a time rather than per-question: any
+# (time × category × value), (category × value), or (time × value) result.
 # --------------------------------------------------------------------------- #
+
+# value columns whose name signals a part-of-a-whole (→ stacked area over time,
+# e.g. 行业/资产/板块 仓位), as opposed to a level (净值/价格 → overlaid lines).
+_SHARE_HINTS = ("weight", "占比", "配置", "仓位", "比例", "ratio", "share", "pct", "占比例")
+
+
+def _series_dimension(df: pd.DataFrame, date_cols, num_cols) -> str | None:
+    """The categorical column that splits the data into series (lowest-cardinality
+    non-date/non-numeric column with >1 value). Generalises the old hardcoded
+    fund_code/fund_name to industry_l1, sec_name, manager, asset_class, ..."""
+    cats = [c for c in df.columns if c not in date_cols and c not in num_cols
+            and df[c].nunique() > 1]
+    return min(cats, key=lambda c: df[c].nunique()) if cats else None
+
+
+def _is_compositional(df: pd.DataFrame, value_col: str) -> bool:
+    """Parts-of-a-whole (stack) vs levels (overlay). Name hint OR values bounded
+    in [0,1] — keeps NAV (values ~1-8) as overlaid lines, weights as stacks."""
+    if any(h in value_col.lower() for h in _SHARE_HINTS):
+        return True
+    s = df[value_col].dropna()
+    return len(s) > 0 and bool(s.between(0, 1.2).mean() > 0.9)
+
+
 def build_chart(df: pd.DataFrame, title: str) -> go.Figure:
     if df.empty:
         return go.Figure()
-    date_cols = [c for c in df.columns if "date" in c.lower()]
+    date_cols = [c for c in df.columns
+                 if pd.api.types.is_datetime64_any_dtype(df[c]) or "date" in c.lower()]
     num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-    cat_cols = [c for c in df.columns if c in ("fund_code", "fund_name")]
+    dim = _series_dimension(df, date_cols, num_cols)
 
     if date_cols and num_cols:
-        x = date_cols[0]
-        y = num_cols[0]
-        color = cat_cols[0] if cat_cols and df[cat_cols[0]].nunique() > 1 else None
-        fig = px.line(df.sort_values(x), x=x, y=y, color=color, title=title)
+        x, y = date_cols[0], num_cols[0]
+        d = df.sort_values(x)
+        if dim and _is_compositional(df, y):
+            # composition over time → stacked area (行业/资产配置 等仓位结构演变).
+            keep = [c for c, g in d.groupby(dim) if g[y].abs().max() > 1e-9]
+            d = d[d[dim].isin(keep)]
+            fig = px.area(d, x=x, y=y, color=dim, title=title)
+        else:
+            # levels over time → overlaid lines, one per series (净值走势/对比).
+            fig = px.line(d, x=x, y=y, color=dim, title=title)
     elif num_cols:
-        fig = px.bar(df, x=df.columns[0], y=num_cols[0], title=title)
+        # no time axis → ranking / breakdown bar over the category.
+        x = dim if dim else df.columns[0]
+        fig = px.bar(df, x=x, y=num_cols[0], title=title)
     else:
         fig = go.Figure()
     fig.update_layout(template="plotly_white", font=dict(family="Microsoft YaHei"))
