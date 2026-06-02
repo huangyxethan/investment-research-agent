@@ -31,6 +31,7 @@ CONTEXT_TABLES = (
     "bridge_fund_manager",
     "fact_nav",
     "v_fund_perf_latest",
+    "v_fund_holding_latest",
     "fact_holding",
     "dim_security",
 )

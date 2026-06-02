@@ -37,3 +37,13 @@
 - {id: met_dd,        class: metric,  mode: values,   question: "兴全合润成立以来的最大回撤是多少", expect: ["0.47"]}
 - {id: met_sharpe,    class: metric,  mode: values,   question: "成立以来夏普比率最高的三只基金", expect: ["永赢科技智选"]}
 - {id: met_vol,       class: metric,  mode: nonempty, question: "成立以来波动率最低的基金是哪只"}
+
+# --- industry class (申万一级): fact_holding JOIN dim_security on sec_code,
+# full holdings only. Oracles re-derived from live data (中欧医疗 ~93% in
+# 医药生物; 蓝筹 top industry 食品饮料). Includes a paraphrase + a 简称 test
+# (医药 -> 医药生物 via the column-COMMENT LIKE rule) to measure generalization.
+- {id: sw_top_1,    class: industry, mode: values,   question: "重仓医药生物行业最多的基金是哪只",            expect: ["中欧医疗"]}
+- {id: sw_top_para, class: industry, mode: values,   question: "哪只基金在医药板块上的持仓占比最高",          expect: ["中欧医疗"]}
+- {id: sw_alloc,    class: industry, mode: values,   question: "易方达蓝筹精选最新一期的行业配置分布",        expect: ["食品饮料"]}
+- {id: sw_filter,   class: industry, mode: values,   question: "易方达蓝筹精选最新全持仓里属于食品饮料行业的股票", expect: ["贵州茅台"]}
+- {id: sw_funds_in, class: industry, mode: nonempty, question: "有哪些基金重仓了银行股"}

@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS dim_security (
     PRIMARY KEY (workspace_id, sec_code)
 );
 COMMENT ON TABLE  dim_security             IS '证券主数据：股票、债券、期货标的';
-COMMENT ON COLUMN dim_security.industry_l1 IS '申万一级行业分类（V1 采用当前静态分类）';
+COMMENT ON COLUMN dim_security.industry_l1 IS '申万一级行业名称（共31个，如 银行、医药生物、电子、食品饮料、机械设备、电力设备、计算机、汽车、有色金属、非银金融 等）。按行业分析持仓时用 fact_holding JOIN dim_security ON sec_code，并配合 fact_holding.is_full_holding=TRUE（全持仓）。行业名用模糊匹配 industry_l1 LIKE ''%关键词%'' 以容忍用户简称（如"医药"匹配"医药生物"、"军工"匹配"国防军工"）。仅 A 股有值；港股及已退市标的为 NULL。V1 采用当前静态分类。';
 
 CREATE TABLE IF NOT EXISTS dim_benchmark (
     workspace_id   text NOT NULL DEFAULT 'default',
@@ -217,6 +217,24 @@ COMMENT ON VIEW   v_fund_perf_latest IS '基金最新业绩指标（每基金每
 COMMENT ON COLUMN v_fund_perf_latest.period       IS '区间：YTD(今年以来)/1Y(近一年)/3Y(近三年)/SI(成立以来)';
 COMMENT ON COLUMN v_fund_perf_latest.total_return IS '区间累计收益率（小数，0.60=60%）';
 COMMENT ON COLUMN v_fund_perf_latest.max_drawdown IS '最大回撤（正数，0.48=回撤48%）';
+
+-- Semantic-layer view: each fund's LATEST full-holding snapshot (半年报/年报),
+-- with 证券名称 + 申万一级行业 already joined in. Picks MAX(report_date) per fund
+-- so cross-period double-counting (SUM over 2022..2025) is impossible — the same
+-- class of fix as v_fund_perf_latest, for the holdings side.
+CREATE OR REPLACE VIEW v_fund_holding_latest AS
+SELECT h.fund_code, h.report_date, h.sec_code, s.sec_name, s.industry_l1,
+       h.weight, h.market_value, h.shares
+FROM fact_holding h
+JOIN (
+    SELECT fund_code, MAX(report_date) AS rd
+    FROM fact_holding WHERE is_full_holding GROUP BY fund_code
+) m ON h.fund_code = m.fund_code AND h.report_date = m.rd
+LEFT JOIN dim_security s ON h.sec_code = s.sec_code
+WHERE h.is_full_holding;
+COMMENT ON VIEW   v_fund_holding_latest IS '每只基金最新一期全持仓快照（已并入证券名称 sec_name 与申万一级行业 industry_l1）。回答"最新/当前持仓、行业配置分布、某行业重仓占比、个股下钻"一律查本视图（已取最新报告期，切勿跨期 SUM）；仅当用户指定具体报告期（如"2025年报"）时才查 fact_holding。';
+COMMENT ON COLUMN v_fund_holding_latest.weight      IS '个股占基金净值比例（小数，0.05=5%）；按行业汇总即配置占比';
+COMMENT ON COLUMN v_fund_holding_latest.industry_l1 IS '申万一级行业；用 LIKE ''%关键词%'' 容忍简称（医药->医药生物）；NULL=港股/北交所/退市标的';
 
 -- =====================================================================
 -- 3. EQUITY ANALYTICS (HOT-PATH PRE-COMPUTED)

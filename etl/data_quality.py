@@ -43,6 +43,10 @@ CHECKS: list[tuple[str, str, str]] = [
      "SELECT fund_code FROM dim_fund WHERE fund_code NOT IN (SELECT DISTINCT fund_code FROM fact_holding)"),
     ("coverage: funds w/o FULL-holding snapshot", "WARN",
      "SELECT fund_code FROM dim_fund WHERE fund_code IN (SELECT fund_code FROM fact_holding) AND fund_code NOT IN (SELECT DISTINCT fund_code FROM fact_holding WHERE is_full_holding)"),
+    # ~142 by design (HK/delisted absent from current 申万 constituents); a jump
+    # toward all-stocks would mean load_sw_industry didn't run.
+    ("coverage: held stocks w/o 申万 industry", "INFO",
+     "SELECT s.sec_code,s.sec_name FROM dim_security s WHERE s.sec_type='stock' AND s.industry_l1 IS NULL AND s.sec_code IN (SELECT DISTINCT sec_code FROM fact_holding)"),
 ]
 
 
