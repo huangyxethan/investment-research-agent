@@ -1,0 +1,6 @@
+# Streamlit app config (committed; applies on Streamlit Community Cloud).
+# toolbarMode = "minimal" hides the top-right hamburger menu (Rerun/Settings/
+# source links) for ALL users — viewers get a clean app with no dev entry points.
+# ("Manage app" + private-repo source are owner-only regardless of this.)
+[client]
+toolbarMode = "minimal"
