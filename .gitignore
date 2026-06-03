@@ -2,6 +2,10 @@
 .env
 *.env
 !.env.example
+.streamlit/secrets.toml
+# local DB dump for cloud migration (may contain full data)
+db_seed.sql
+*.dump
 
 # Python
 __pycache__/

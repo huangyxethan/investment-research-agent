@@ -1,37 +1,12 @@
-# --- Data sources ---
-akshare
-mootdx
-
-# --- Storage / DB ---
-psycopg[binary]
-SQLAlchemy
-pgvector
-pandas
-numpy
-python-dotenv      # .env loading for ETL/agent
-
-# --- NL2SQL agent ---
-vanna
-anthropic
-openai            # DeepSeek via OpenAI-compatible API
-
-# --- Embedding (local, CPU) ---
-sentence-transformers   # serves bge-large-zh-v1.5
-
-# --- SQL safety / viz ---
-sqlglot
-jsonschema
-plotly
-jinja2
-jsonpatch
-pyyaml             # eval cases
-
-# --- ETL orchestration ---
-dagster
-dagster-webserver
-
-# --- Frontend ---
+# App runtime deps — exactly what the deployed Streamlit app imports.
+# Kept slim so Streamlit Community Cloud builds fast (no torch/dagster/akshare).
+# Heavy ETL/ML/dev deps live in requirements-etl.txt.
 streamlit
-
-# NOTE: Python 3.13 detected. If any wheel (torch/sentence-transformers)
-# is unavailable for 3.13, fall back to a 3.11 venv for the agent service.
+streamlit-authenticator   # login + role-based access
+psycopg[binary]           # Postgres driver (agent.pipeline)
+pandas
+plotly                    # charts
+python-dotenv             # local .env loading
+openai                    # DeepSeek via OpenAI-compatible API
+anthropic                 # Claude (primary/showcase tier)
+sqlglot                   # SQL safety rails (agent.sql_guard)

@@ -1,26 +1,97 @@
 """
-W2 walking-skeleton frontend (blueprint §9.1).
+Streamlit frontend (blueprint §9.1) — now deployable & access-controlled.
 
-Question box -> narrative -> chart -> SQL -> data table. Thin wrapper over
-agent.pipeline.ask; the V2 Next.js+FastAPI path reuses the same agent surface.
+Thin wrapper over agent.pipeline.ask. Login + role-based access via
+streamlit-authenticator; secrets (DB url, LLM keys, accounts) come from
+st.secrets so the same code runs locally and on Streamlit Community Cloud.
 
-Run:  .venv/Scripts/streamlit.exe run web/app.py
+Roles (demo; refine later):
+  admin  — narrative + chart + generated SQL + full data table
+  viewer — narrative + chart + truncated data; SQL hidden
+
+The agent core (agent.pipeline.ask) stays UI-agnostic: when we later move to a
+FastAPI + React canvas, authorization moves to the API boundary and this file is
+replaced wholesale — the reusable assets (hosted DB, secrets, accounts) carry over.
+
+Run locally:  .venv/Scripts/streamlit.exe run web/app.py
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import sys
 
 import streamlit as st
 
+# --- 1. secrets -> env, so agent/* (which read os.environ) work unchanged ------
+def _load_secrets_into_env() -> None:
+    try:
+        for k, v in st.secrets.items():
+            if isinstance(v, str) and not os.environ.get(k):
+                os.environ[k] = v
+    except Exception:
+        pass  # no secrets file locally → rely on .env
+
+
+_load_secrets_into_env()
+
 # make the `agent` package importable when launched via `streamlit run`
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+
+import streamlit_authenticator as stauth  # noqa: E402
 
 from agent.pipeline import ask  # noqa: E402
 
 st.set_page_config(page_title="投研数据智能体", layout="wide")
+
+
+# --- 2. auth -----------------------------------------------------------------
+def _build_auth():
+    """Build (authenticator, role_map) from st.secrets['auth']."""
+    auth = st.secrets["auth"].to_dict()
+    users = auth["credentials"]["usernames"]
+    # strip our custom 'role' key out of what we hand the library
+    credentials = {"usernames": {
+        u: {k: val for k, val in info.items() if k != "role"}
+        for u, info in users.items()
+    }}
+    roles = {u: info.get("role", "viewer") for u, info in users.items()}
+    authenticator = stauth.Authenticate(
+        credentials, "invest_agent_auth",
+        st.secrets.get("cookie_key", "dev-cookie-key"),
+        cookie_expiry_days=7, auto_hash=False,
+    )
+    return authenticator, roles
+
+
+try:
+    authenticator, ROLE_MAP = _build_auth()
+except Exception:
+    st.error("未配置登录凭据。请在 .streamlit/secrets.toml 或 Cloud Secrets 中按 "
+             "secrets.toml.example 填写 [auth] 段。")
+    st.stop()
+
+authenticator.login(location="main")
+status = st.session_state.get("authentication_status")
+if status is False:
+    st.error("用户名或密码错误。")
+    st.stop()
+if status is None:
+    st.warning("请登录以使用投研数据智能体。")
+    st.stop()
+
+username = st.session_state.get("username", "")
+name = st.session_state.get("name", username)
+role = ROLE_MAP.get(username, "viewer")
+
+with st.sidebar:
+    st.markdown(f"**{name}**")
+    st.caption(f"身份：{'管理员' if role == 'admin' else '访客'}（{role}）")
+    authenticator.logout("退出登录", location="sidebar")
+
+# --- 3. app ------------------------------------------------------------------
 st.title("投研数据智能体")
-st.caption("中国公募基金 · 自然语言问答 (W2 骨架)")
+st.caption("中国公募基金 · 自然语言问答")
 
 with st.form("ask"):
     question = st.text_input("提问", "易方达蓝筹精选今年的单位净值走势")
@@ -38,11 +109,15 @@ if submitted and question.strip():
     st.write(res.narrative)
 
     if res.figure.data:
-        st.plotly_chart(res.figure, use_container_width=True)
+        st.plotly_chart(res.figure, width='stretch')
     else:
         st.info("本次结果未生成图表，请见下方数据。")
 
-    with st.expander("生成的 SQL"):
-        st.code(res.sql, language="sql")
-    with st.expander(f"原始数据（{len(res.df)} 行）"):
-        st.dataframe(res.df, use_container_width=True)
+    if role == "admin":
+        with st.expander("生成的 SQL"):
+            st.code(res.sql, language="sql")
+        with st.expander(f"原始数据（{len(res.df)} 行）"):
+            st.dataframe(res.df, width='stretch')
+    else:
+        with st.expander(f"数据（前 50 行，共 {len(res.df)} 行）"):
+            st.dataframe(res.df.head(50), width='stretch')

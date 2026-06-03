@@ -1,0 +1,27 @@
+# ETL / ML / dev deps — NOT needed by the deployed Streamlit app, so they are
+# kept out of requirements.txt (which Streamlit Community Cloud installs).
+# Local data work:  pip install -r requirements-etl.txt
+-r requirements.txt
+
+# --- Data sources ---
+akshare
+mootdx
+
+# --- Storage / embeddings ---
+SQLAlchemy
+pgvector
+numpy
+
+# --- NL2SQL training / RAG (W5) ---
+vanna
+sentence-transformers   # bge-large-zh-v1.5 (pulls torch — heavy)
+
+# --- viz spec / eval ---
+jsonschema
+jinja2
+jsonpatch
+pyyaml                  # eval cases
+
+# --- ETL orchestration ---
+dagster
+dagster-webserver
