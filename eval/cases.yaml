@@ -52,3 +52,8 @@
 # expect fails any answer that collapsed to the latest single snapshot.
 - {id: sw_ts_alloc, class: industry, mode: values, question: "易方达蓝筹精选近三年各申万行业绝对仓位的变化",   expect: ["食品饮料", "2024"]}
 - {id: sw_ts_para,  class: industry, mode: values, question: "易方达蓝筹精选历年各行业仓位的演变趋势",       expect: ["食品饮料", "2024"]}
+# 申万二级 (industry_l2): aggregate v_fund_holding_latest GROUP BY industry_l2.
+# LIKE tolerates the 罗马数字 suffix (白酒 -> 白酒Ⅱ). Oracles from live data.
+- {id: sw_l2_top,   class: industry, mode: values, question: "白酒板块仓位最高的基金是哪只",        expect: ["招商中证白酒"]}
+- {id: sw_l2_semi,  class: industry, mode: values, question: "哪只基金重仓半导体行业最多",          expect: ["申万菱信智能驱动"]}
+- {id: sw_l2_alloc, class: industry, mode: values, question: "易方达蓝筹精选最新一期的申万二级行业配置", expect: ["白酒"]}

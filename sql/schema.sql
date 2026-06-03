@@ -76,8 +76,9 @@ CREATE TABLE IF NOT EXISTS dim_security (
     delist_date  date,
     PRIMARY KEY (workspace_id, sec_code)
 );
-COMMENT ON TABLE  dim_security             IS '证券主数据：股票、债券、期货标的';
+COMMENT ON TABLE  dim_security             IS '证券主数据：股票、债券、期货标的（股票含申万一级 industry_l1、二级 industry_l2 分类）';
 COMMENT ON COLUMN dim_security.industry_l1 IS '申万一级行业名称（共31个，如 银行、医药生物、电子、食品饮料、机械设备、电力设备、计算机、汽车、有色金属、非银金融 等）。按行业分析持仓时用 fact_holding JOIN dim_security ON sec_code，并配合 fact_holding.is_full_holding=TRUE（全持仓）。行业名用模糊匹配 industry_l1 LIKE ''%关键词%'' 以容忍用户简称（如"医药"匹配"医药生物"、"军工"匹配"国防军工"）。仅 A 股有值；港股及已退市标的为 NULL。V1 采用当前静态分类。';
+COMMENT ON COLUMN dim_security.industry_l2 IS '申万二级行业名称（共131个，如 白酒Ⅱ、半导体、医疗器械、乘用车、汽车零部件、光伏设备、电力 等；隶属 industry_l1）。用 LIKE ''%关键词%'' 容忍简称及罗马数字后缀（如"白酒"匹配"白酒Ⅱ"）。仅 A 股有值；港股/北交所/退市为 NULL。V1 静态分类。';
 
 CREATE TABLE IF NOT EXISTS dim_benchmark (
     workspace_id   text NOT NULL DEFAULT 'default',
@@ -227,7 +228,7 @@ COMMENT ON COLUMN v_fund_perf_latest.max_drawdown IS '最大回撤（正数，0.
 DROP VIEW IF EXISTS v_fund_holding_latest;
 CREATE VIEW v_fund_holding_latest AS
 SELECT h.fund_code, d.fund_name, h.report_date, h.sec_code, s.sec_name,
-       s.industry_l1, h.weight, h.market_value, h.shares
+       s.industry_l1, s.industry_l2, h.weight, h.market_value, h.shares
 FROM fact_holding h
 JOIN (
     SELECT fund_code, MAX(report_date) AS rd
@@ -236,9 +237,10 @@ JOIN (
 JOIN dim_fund d ON h.fund_code = d.fund_code
 LEFT JOIN dim_security s ON h.sec_code = s.sec_code
 WHERE h.is_full_holding;
-COMMENT ON VIEW   v_fund_holding_latest IS '每只基金【最新一期】全持仓的【个股】明细（含 fund_name、sec_name、申万行业 industry_l1、个股 weight）。回答"最新重仓股/前N大/某基金持有哪些股票/某行业里持有哪些个股(个股下钻)"用本视图。行业【层面】的配置/占比/排名/时序请改用 v_fund_industry_alloc（不要在本视图臆造 industry_weight 列）。指定具体报告期（如"2025年报"）才查 fact_holding。';
-COMMENT ON COLUMN v_fund_holding_latest.weight      IS '该个股占基金净值比例（小数，0.05=5%）';
+COMMENT ON VIEW   v_fund_holding_latest IS '每只基金【最新一期】全持仓的【个股】明细（含 fund_name、sec_name、申万一级 industry_l1、申万二级 industry_l2、个股 weight）。回答"最新重仓股/前N大/某基金持有哪些股票/某行业(一级或二级)里持有哪些个股(个股下钻)"用本视图。行业【层面】的配置/占比/排名/时序：一级用 v_fund_industry_alloc，二级用 v_fund_industry_l2_alloc（不要在本视图臆造 industry_weight 列）。指定具体报告期（如"2025年报"）才查 fact_holding。';
+COMMENT ON COLUMN v_fund_holding_latest.weight      IS '该个股占基金净值比例（小数，0.05=5%）；按 industry_l1 或 industry_l2 汇总即对应层级的配置占比';
 COMMENT ON COLUMN v_fund_holding_latest.industry_l1 IS '所属申万一级行业；用 LIKE ''%关键词%'' 容忍简称（医药->医药生物）；NULL=港股/北交所/退市标的';
+COMMENT ON COLUMN v_fund_holding_latest.industry_l2 IS '所属申万二级行业（共131个，如 白酒Ⅱ、半导体、医疗器械、乘用车 等）；用 LIKE ''%关键词%'' 容忍简称及罗马数字后缀（"白酒"匹配"白酒Ⅱ"）；NULL=港股/北交所/退市标的';
 
 -- v_fund_industry_alloc: the single INDUSTRY-level surface. Per (fund, report_date,
 -- industry) summed weight across full holdings, with an is_latest flag so the SAME
@@ -257,9 +259,30 @@ FROM (
     WHERE h.is_full_holding AND s.industry_l1 IS NOT NULL
     GROUP BY h.fund_code, d.fund_name, h.report_date, s.industry_l1
 ) a;
-COMMENT ON VIEW   v_fund_industry_alloc IS '基金各报告期（半年报/年报全持仓）的申万一级行业配置，每(基金,报告期,行业)一行。时间轴是 report_date（本视图【没有 period 列】，"近N年/某年以来"一律用 report_date 过滤，如 report_date>=''2023-06-01''，切勿写 period=''3Y''）。问"行业仓位随时间变化/趋势/历史/演变/近N年/堆叠折线|面积图"→不加 is_latest（时间序列）；问"最新行业配置分布/某行业占比最高/行业排名"→加 WHERE is_latest（只取每只基金最新一期，无需相关子查询）。已排除未归类标的（港股通/北交所），故各期行业权重之和≤股票总仓位。';
+COMMENT ON VIEW   v_fund_industry_alloc IS '基金各报告期（半年报/年报全持仓）的申万【一级】行业配置，每(基金,报告期,一级行业)一行。【仅一级行业】；二级行业(industry_l2)的配置/占比/排名/时序请用 v_fund_industry_l2_alloc。时间轴是 report_date（本视图【没有 period 列】，"近N年/某年以来"一律用 report_date 过滤，如 report_date>=''2023-06-01''，切勿写 period=''3Y''）。问"行业仓位随时间变化/趋势/历史/演变/近N年/堆叠折线|面积图"→不加 is_latest（时间序列）；问"最新行业配置分布/某行业占比最高/行业排名"→加 WHERE is_latest。已排除未归类标的（港股通/北交所）。';
 COMMENT ON COLUMN v_fund_industry_alloc.is_latest      IS '该行是否为所属基金的最新一期全持仓；看最新截面/排名加 WHERE is_latest，看时序则不加';
 COMMENT ON COLUMN v_fund_industry_alloc.industry_weight IS '该报告期内该申万一级行业的占净值比例之和（小数，0.38=38%），即绝对仓位；如需相对占比再按报告期归一化';
+
+-- v_fund_industry_l2_alloc: the 申万 L2 sibling of v_fund_industry_alloc — same
+-- is_latest pattern (latest cross-section/ranking vs time series), carries parent
+-- industry_l1 too. Symmetric surface so L1/L2 industry questions route cleanly.
+DROP VIEW IF EXISTS v_fund_industry_l2_alloc;
+CREATE VIEW v_fund_industry_l2_alloc AS
+SELECT a.fund_code, a.fund_name, a.report_date, a.industry_l1, a.industry_l2,
+       a.industry_weight,
+       (a.report_date = MAX(a.report_date) OVER (PARTITION BY a.fund_code)) AS is_latest
+FROM (
+    SELECT h.fund_code, d.fund_name, h.report_date, s.industry_l1, s.industry_l2,
+           SUM(h.weight) AS industry_weight
+    FROM fact_holding h
+    JOIN dim_fund d ON h.fund_code = d.fund_code
+    JOIN dim_security s ON h.sec_code = s.sec_code
+    WHERE h.is_full_holding AND s.industry_l2 IS NOT NULL
+    GROUP BY h.fund_code, d.fund_name, h.report_date, s.industry_l1, s.industry_l2
+) a;
+COMMENT ON VIEW   v_fund_industry_l2_alloc IS '基金各报告期（半年报/年报全持仓）的申万【二级】行业配置，每(基金,报告期,二级行业)一行（含父级 industry_l1、is_latest 标志）。【二级行业】的配置/占比/排名/时序一律用本视图；【一级行业】用 v_fund_industry_alloc。最新截面/排名加 WHERE is_latest；时序不加；时间轴 report_date（无 period 列，近N年用 report_date 过滤）。industry_l2 用 LIKE 容忍简称及罗马数字后缀（"白酒"匹配"白酒Ⅱ"）。已排除未归类标的（港股/北交所）。';
+COMMENT ON COLUMN v_fund_industry_l2_alloc.is_latest      IS '是否为该基金最新一期；最新/排名加 WHERE is_latest，时序不加';
+COMMENT ON COLUMN v_fund_industry_l2_alloc.industry_weight IS '该报告期该申万二级行业占净值比例之和（小数，0.38=38%）';
 
 -- =====================================================================
 -- 3. EQUITY ANALYTICS (HOT-PATH PRE-COMPUTED)

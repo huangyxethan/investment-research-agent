@@ -51,3 +51,13 @@
     WHERE fund_name LIKE '%易方达蓝筹精选%' AND industry_l1 LIKE '%食品饮料%'
     ORDER BY weight DESC;
   note: 个股下钻用个股视图 v_fund_holding_latest（勿在此视图臆造 industry_weight）。
+
+- id: sw_l2_fund_top
+  question: 白酒板块仓位最高的基金是哪只
+  sql: |
+    SELECT fund_name, ROUND(industry_weight::numeric, 4) AS industry_weight
+    FROM v_fund_industry_l2_alloc
+    WHERE industry_l2 LIKE '%白酒%' AND is_latest
+    ORDER BY industry_weight DESC
+    LIMIT 10;
+  note: 申万二级配置/排名/时序 → v_fund_industry_l2_alloc（一级用 v_fund_industry_alloc）；LIKE 容忍"白酒Ⅱ"后缀。

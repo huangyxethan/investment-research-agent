@@ -1,21 +1,27 @@
 """
-W3+ step — populate dim_security.industry_l1 with 申万一级 (Shenwan L1) industry.
+W3+ step — populate dim_security.industry_l1 / industry_l2 with 申万 (Shenwan)
+一级/二级 industry classification.
 
-Source decision (see etl/explore_sw_industry*.py probes, retired):
+Source decision (see retired etl/explore_sw_industry* probes):
   - ak.stock_industry_clf_hist_sw (official swsresearch.com xls) — SSL/read
     timeout from this network, unreliable.
   - ak.index_component_sw / index_hist_sw — JSONDecodeError in akshare 1.18.64.
-  - legulegu index-composition — REACHABLE, one call per 申万 L1 code returns ALL
-    constituents (not paginated) with a 申万1级 column. This is the source.
-    (ak.sw_index_third_cons wraps the same host but hardcodes stale column names,
-     so we call read_html ourselves.)
+  - legulegu index-composition — REACHABLE: one call per 申万 industry CODE returns
+    ALL its constituents (not paginated). The page's level column varies (申万1级 for
+    an L1 code, 申万2级 for an L2 code), so we DON'T read it — we take the industry
+    name from the code we queried (sw_index_first_info / sw_index_second_info).
+    (ak.sw_index_third_cons wraps the same host but hardcodes stale columns.)
+
+Hierarchy: 31 L1 codes, 131 L2 codes; every A-share sits in exactly one L2, whose
+parent L1 is sw_index_second_info.上级行业. L1 and L2 are fetched independently
+(L1 already verified at 95.3%); coverage is the same source/universe.
 
 Coverage ~95% of held A-shares. Misses = delisted/suspended names from older
-holding snapshots (absent from current 申万 constituent lists) + HK stocks
-(申万 is A-share only). Left NULL by design — an honest data gap.
+holding snapshots + HK (港股通) + 北交所 (920xxx) — 申万 is A-share main/创业/科创
+only. Left NULL by design — an honest data gap.
 
-Cache: etl/sw_industry_l1.csv (committed snapshot for reproducibility / offline
-ETL). Use --refresh to re-fetch from legulegu.
+Caches: etl/sw_industry_l1.csv, etl/sw_industry_l2.csv (committed snapshots for
+reproducibility / offline ETL). Use --refresh to re-fetch both from legulegu.
 
 ETL order: ... -> load_holdings (creates dim_security rows) -> load_sw_industry.
 
@@ -36,17 +42,23 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-CACHE = os.path.join(os.path.dirname(__file__), "sw_industry_l1.csv")
+_DIR = os.path.dirname(__file__)
+CACHE_L1 = os.path.join(_DIR, "sw_industry_l1.csv")
+CACHE_L2 = os.path.join(_DIR, "sw_industry_l2.csv")
 _UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 
-def _fetch_l1_constituents(code: str) -> pd.DataFrame:
-    """All constituents of one 申万 L1 index, with their 申万1级 name."""
+def _fetch_constituents(code: str) -> pd.DataFrame:
+    """All constituents (code6, sec_name) of one 申万 industry index code."""
     url = f"https://legulegu.com/stockdata/index-composition?industryCode={code}"
     r = requests.get(url, headers=_UA, timeout=60)
     r.raise_for_status()
     df = pd.read_html(StringIO(r.text))[0]
-    return df[["股票代码", "股票简称", "申万1级"]].copy()
+    out = pd.DataFrame({
+        "code6": df["股票代码"].astype(str).str.split(".").str[0].str.zfill(6),
+        "sec_name": df["股票简称"].astype(str),
+    })
+    return out
 
 
 def fetch_sw_l1_map() -> pd.DataFrame:
@@ -56,57 +68,82 @@ def fetch_sw_l1_map() -> pd.DataFrame:
     for row in l1.itertuples(index=False):
         code, name = str(row.行业代码), str(row.行业名称)
         try:
-            frames.append(_fetch_l1_constituents(code))
-            print(f"  ✓ {code} {name}: {len(frames[-1])} stocks")
+            c = _fetch_constituents(code)
+            c["sw_l1"] = name
+            frames.append(c)
+            print(f"  ✓ L1 {code} {name}: {len(c)} stocks")
         except Exception as e:
-            print(f"  ✗ {code} {name}: {type(e).__name__}: {str(e)[:80]}")
+            print(f"  ✗ L1 {code} {name}: {type(e).__name__}: {str(e)[:80]}")
         time.sleep(0.4)
     m = pd.concat(frames, ignore_index=True)
-    m["code6"] = m["股票代码"].astype(str).str.split(".").str[0].str.zfill(6)
-    m = m.rename(columns={"股票简称": "sec_name", "申万1级": "sw_l1"})
-    return m[["code6", "sec_name", "sw_l1"]].drop_duplicates(subset="code6")
+    return m.drop_duplicates(subset="code6")[["code6", "sec_name", "sw_l1"]]
 
 
-def load_map(refresh: bool = False) -> pd.DataFrame:
-    if refresh or not os.path.exists(CACHE):
-        print("[fetch] building 申万一级 map from legulegu ...")
-        m = fetch_sw_l1_map()
-        m.to_csv(CACHE, index=False, encoding="utf-8-sig")
-        print(f"[cache] wrote {len(m)} rows -> {CACHE}")
+def fetch_sw_l2_map() -> pd.DataFrame:
+    """stock -> 申万二级 (+ parent 一级) over all 131 L2 industries.
+    Columns: code6, sec_name, sw_l2, sw_l1."""
+    l2 = ak.sw_index_second_info()  # 行业代码, 行业名称, 上级行业, ...
+    frames = []
+    for row in l2.itertuples(index=False):
+        code, name, parent = str(row.行业代码), str(row.行业名称), str(row.上级行业)
+        try:
+            c = _fetch_constituents(code)
+            c["sw_l2"], c["sw_l1"] = name, parent
+            frames.append(c)
+            print(f"  ✓ L2 {code} {name} (<{parent}): {len(c)} stocks")
+        except Exception as e:
+            print(f"  ✗ L2 {code} {name}: {type(e).__name__}: {str(e)[:80]}")
+        time.sleep(0.4)
+    m = pd.concat(frames, ignore_index=True)
+    return m.drop_duplicates(subset="code6")[["code6", "sec_name", "sw_l2", "sw_l1"]]
+
+
+def load_cached(path: str, fetch_fn, label: str, refresh: bool) -> pd.DataFrame:
+    if refresh or not os.path.exists(path):
+        print(f"[fetch] building {label} map from legulegu ...")
+        m = fetch_fn()
+        m.to_csv(path, index=False, encoding="utf-8-sig")
+        print(f"[cache] wrote {len(m)} rows -> {path}")
     else:
-        m = pd.read_csv(CACHE, dtype={"code6": str})
+        m = pd.read_csv(path, dtype={"code6": str})
         m["code6"] = m["code6"].str.zfill(6)
-        print(f"[cache] loaded {len(m)} rows from {CACHE}")
+        print(f"[cache] loaded {len(m)} rows from {path}")
     return m
 
 
 def main() -> int:
     refresh = "--refresh" in sys.argv
-    m = load_map(refresh)
-    code_to_l1 = dict(zip(m["code6"], m["sw_l1"]))
+    m1 = load_cached(CACHE_L1, fetch_sw_l1_map, "申万一级", refresh)
+    m2 = load_cached(CACHE_L2, fetch_sw_l2_map, "申万二级", refresh)
+    to_l1 = dict(zip(m1["code6"], m1["sw_l1"]))
+    to_l2 = dict(zip(m2["code6"], m2["sw_l2"]))
 
     with psycopg.connect(os.environ["PG_CONN_STR"]) as conn, conn.cursor() as cur:
         cur.execute("SELECT sec_code FROM dim_security WHERE sec_type='stock';")
         held = [r[0] for r in cur.fetchall()]
-        updated = 0
+        n1 = n2 = 0
         for sec_code in held:
-            l1 = code_to_l1.get(str(sec_code).split(".")[0].zfill(6))
-            if l1:
+            k = str(sec_code).split(".")[0].zfill(6)
+            l1, l2 = to_l1.get(k), to_l2.get(k)
+            if l1 or l2:
                 cur.execute(
-                    "UPDATE dim_security SET industry_l1=%s "
+                    "UPDATE dim_security SET industry_l1=COALESCE(%s, industry_l1), "
+                    "industry_l2=COALESCE(%s, industry_l2) "
                     "WHERE workspace_id='default' AND sec_code=%s;",
-                    (l1, sec_code),
+                    (l1, l2, sec_code),
                 )
-                updated += 1
+                n1 += bool(l1)
+                n2 += bool(l2)
         conn.commit()
 
         cur.execute(
-            "SELECT count(*) FILTER (WHERE industry_l1 IS NOT NULL), count(*) "
+            "SELECT count(*) FILTER (WHERE industry_l1 IS NOT NULL), "
+            "       count(*) FILTER (WHERE industry_l2 IS NOT NULL), count(*) "
             "FROM dim_security WHERE sec_type='stock';"
         )
-        have, total = cur.fetchone()
-    print(f"\n[done] updated {updated} rows; industry_l1 set on {have}/{total} "
-          f"stocks ({100*have/max(total,1):.1f}%)")
+        h1, h2, total = cur.fetchone()
+    print(f"\n[done] L1 set on {h1}/{total} ({100*h1/max(total,1):.1f}%); "
+          f"L2 set on {h2}/{total} ({100*h2/max(total,1):.1f}%)")
     return 0
 
 
