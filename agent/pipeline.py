@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import decimal
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -19,7 +20,7 @@ import plotly.graph_objects as go
 import psycopg
 from dotenv import load_dotenv
 
-from .clients import LLMClient, default_client
+from .clients import LLMClient, default_client, make_client
 from .sql_guard import guard
 
 load_dotenv()
@@ -311,6 +312,138 @@ def build_chart(df: pd.DataFrame, title: str, *,
 
 
 # --------------------------------------------------------------------------- #
+# Tier-3 — LLM-authored declarative chart spec (blueprint §7, D10).
+#
+# The LLM emits a constrained JSON spec (chart type + column encodings), NOT
+# rendering code; we validate it against the actual result columns and render it
+# with our own engine. Invalid/failed spec → fall back to the Tier-2 build_chart.
+# Same discipline as NL2SQL: model proposes, we validate, deterministic execute.
+# --------------------------------------------------------------------------- #
+_CHART_TYPES = ("line", "bar", "area", "pie", "scatter")
+
+_SPEC_SYS = """你是图表规格生成器。根据【用户问题】和【数据列】，为结果选出最合适的图表，
+只输出一个 JSON 对象，不要解释、不要 markdown 代码围栏。
+
+JSON 字段（schema）：
+- chart_type: "line"|"bar"|"area"|"pie"|"scatter"
+- x: 列名（pie 表示扇区类别，scatter/line/bar 的横轴；x/y 取值必须是给定列名之一）
+- y: 列名（pie 表示数值，其余为纵轴数值）
+- color: 列名 或 null（按该列分组着色，如按基金类型/行业分色；散点可按某指标着色）
+- size: 列名 或 null（仅 scatter，气泡大小，须为非负数值列）
+- orientation: "v" 或 "h"（仅 bar；条目多/名称长时用 "h" 横向更易读）
+- stack: true/false（仅 area/bar，是否堆叠）
+- normalize: "percent" 或 null（百分比/100%堆叠，看“相对占比/构成”时用）
+- sort: null 或 {"by":"列名","dir":"asc"|"desc"}（排名类按数值降序）
+- title: 简短中文标题
+
+选型规则：
+- 时间序列(含日期列)→ line；行业/资产仓位随时间且看构成 → area(可 stack/normalize)
+- 两个数值指标的关系(如收益vs波动)→ scatter，可用 color/size 增加维度
+- 单期占比/构成 → pie；排名/对比 → bar(按值排序，条目多用 orientation:h)
+- x/y/color/size 只能引用给定列名，绝不杜撰列名。"""
+
+
+def _dtype_kind(s: pd.Series) -> str:
+    if pd.api.types.is_datetime64_any_dtype(s):
+        return "date"
+    if pd.api.types.is_numeric_dtype(s):
+        return "number"
+    return "text"
+
+
+def _label_col(df: pd.DataFrame, used) -> str | None:
+    for c in df.columns:
+        if c not in used and not pd.api.types.is_numeric_dtype(df[c]):
+            return c
+    return None
+
+
+def _validate_spec(spec, df: pd.DataFrame) -> bool:
+    if not isinstance(spec, dict):
+        return False
+    if spec.get("chart_type") not in _CHART_TYPES:
+        return False
+    cols = set(df.columns)
+    if spec.get("x") not in cols or spec.get("y") not in cols:
+        return False
+    for f in ("color", "size"):
+        v = spec.get(f)
+        if v is not None and v not in cols:
+            return False
+    return True
+
+
+def render_spec(df: pd.DataFrame, spec: dict, *, recolor: str | None = None) -> go.Figure:
+    """Render a validated chart spec to a Plotly figure (the single renderer)."""
+    t = spec["chart_type"]
+    x, y = spec["x"], spec["y"]
+    color, size = spec.get("color"), spec.get("size")
+    title = spec.get("title") or ""
+    d = df
+    srt = spec.get("sort")
+    if isinstance(srt, dict) and srt.get("by") in d.columns:
+        d = d.sort_values(srt["by"], ascending=(srt.get("dir") == "asc"))
+
+    if t == "pie":
+        fig = _pie(d, x, y, title)
+    elif t == "scatter":
+        if size and (not pd.api.types.is_numeric_dtype(d[size]) or (d[size] < 0).any()):
+            size = None  # px.scatter size must be non-negative numeric
+        fig = px.scatter(d, x=x, y=y, color=color, size=size,
+                         hover_name=_label_col(d, {x, y, color, size}), title=title)
+    elif t == "line":
+        fig = px.line(d.sort_values(x), x=x, y=y, color=color, title=title)
+        if spec.get("normalize") == "percent" and color:
+            fig.update_traces(groupnorm="percent")
+    elif t == "area":
+        fig = px.area(d.sort_values(x), x=x, y=y, color=color, title=title)
+        if spec.get("normalize") == "percent":
+            fig.update_traces(groupnorm="percent")
+    elif t == "bar":
+        if spec.get("orientation") == "h":
+            fig = px.bar(d, x=y, y=x, color=color, orientation="h", title=title)
+        else:
+            fig = px.bar(d, x=x, y=y, color=color, title=title)
+        if color or spec.get("stack"):
+            fig.update_layout(barmode="stack" if spec.get("stack") else "group")
+        if spec.get("normalize") == "percent":
+            fig.update_layout(barnorm="percent")
+    else:
+        raise ValueError(f"unknown chart_type {t}")
+
+    if recolor:
+        _apply_color(fig, recolor)
+    fig.update_layout(template="plotly_white", font=dict(family="Microsoft YaHei"))
+    return fig
+
+
+def _spec_client() -> LLMClient:
+    """Claude for spec authoring (stronger structured output); DeepSeek fallback."""
+    try:
+        return make_client("claude")
+    except Exception:
+        return default_client()
+
+
+def author_chart_spec(question: str, df: pd.DataFrame,
+                      llm: LLMClient | None = None) -> dict | None:
+    """Tier-3: ask the LLM for a chart spec; return it only if valid, else None."""
+    if df.empty or len(df.columns) < 2:
+        return None
+    llm = llm or _spec_client()
+    cols = ", ".join(f"{c}:{_dtype_kind(df[c])}" for c in df.columns)
+    payload = (f"问题：{question}\n数据列：{cols}\n样例（前3行）：\n"
+               f"{df.head(3).to_string(index=False)}")
+    try:
+        raw = llm.complete(_SPEC_SYS, payload, max_tokens=300)
+        raw = re.sub(r"^```[a-zA-Z]*|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+        spec = json.loads(raw)
+    except Exception:
+        return None
+    return spec if _validate_spec(spec, df) else None
+
+
+# --------------------------------------------------------------------------- #
 # orchestration
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -320,6 +453,7 @@ class AskResult:
     df: pd.DataFrame
     narrative: str
     figure: go.Figure
+    spec: dict | None = None   # Tier-3 chart spec (None when Tier-2 fallback used)
 
 
 def ask(question: str, llm: LLMClient | None = None) -> AskResult:
@@ -328,8 +462,12 @@ def ask(question: str, llm: LLMClient | None = None) -> AskResult:
     sql = generate_sql(question, llm, schema)
     df = run_sql(sql)
     narrative = narrate(question, df, llm)
-    figure = build_chart(df, question)
-    return AskResult(question, sql, df, narrative, figure)
+    spec = author_chart_spec(question, df)          # Tier-3 (Claude); None on failure
+    try:
+        figure = render_spec(df, spec) if spec else build_chart(df, question)
+    except Exception:
+        figure, spec = build_chart(df, question), None   # graceful fallback
+    return AskResult(question, sql, df, narrative, figure, spec)
 
 
 if __name__ == "__main__":
