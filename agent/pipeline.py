@@ -174,31 +174,138 @@ def _is_compositional(df: pd.DataFrame, value_col: str) -> bool:
     return len(s) > 0 and bool(s.between(0, 1.2).mean() > 0.9)
 
 
-def build_chart(df: pd.DataFrame, title: str) -> go.Figure:
+# explicit chart-type requests in the question, honored when the data fits.
+# A tiny intent layer (the full Tier-3 LLM-spec author is W6); generalises to any
+# "用饼图/柱状图/折线图/面积图展示…" phrasing, not one hard-coded question.
+# order matters: 'area' is checked before 'line' so "堆叠折线图" → stacked area
+# (it contains both 堆叠 and 折线; the 堆叠 intent wins).
+_CHART_KEYWORDS = {
+    "pie":     ("饼图", "饼状", "扇形", "占比图", "pie"),
+    "scatter": ("散点", "气泡", "scatter"),
+    "area":    ("面积", "堆叠", "堆积", "area", "stacked"),
+    "line":    ("折线", "线图", "曲线", "line"),
+    "bar":     ("柱状", "条形", "柱形", "bar"),
+}
+
+
+def _requested_chart(text: str) -> str | None:
+    t = (text or "").lower()
+    for kind, kws in _CHART_KEYWORDS.items():
+        if any(k.lower() in t for k in kws):
+            return kind
+    return None
+
+
+# in-place chart edits ("改成红色" / "换柱状图") — applied to the SAME data with
+# no re-query / no LLM call, so the demo feels like Genie's live tweaking.
+_COLOR_MAP = {
+    "红色": "red", "红": "red", "蓝色": "blue", "蓝": "blue", "绿色": "green", "绿": "green",
+    "橙色": "orange", "橙": "orange", "黄色": "gold", "黄": "gold", "紫色": "purple", "紫": "purple",
+    "黑色": "black", "黑": "black", "灰色": "gray", "灰": "gray", "青色": "cyan", "粉色": "pink",
+}
+_PIE_SCALE = {"red": "Reds", "blue": "Blues", "green": "Greens", "orange": "Oranges",
+              "purple": "Purples", "gray": "Greys"}
+_EDIT_VERBS = ("改成", "改为", "换成", "换", "变成", "变为", "调成", "弄成", "改", "设成")
+
+
+def parse_chart_edit(text: str) -> dict:
+    """Extract {chart_type?, color?} from a modify instruction."""
+    edit: dict = {}
+    ct = _requested_chart(text)
+    if ct:
+        edit["chart_type"] = ct
+    for word, css in _COLOR_MAP.items():
+        if word in (text or ""):
+            edit["color"] = css
+            break
+    return edit
+
+
+def is_chart_edit(text: str) -> bool:
+    """True if `text` is an in-place chart tweak (edit verb + a type/color token)."""
+    return bool(parse_chart_edit(text)) and any(v in (text or "") for v in _EDIT_VERBS)
+
+
+def _apply_color(fig: go.Figure, color: str) -> None:
+    css = _COLOR_MAP.get(color, color)
+    if not fig.data:
+        return
+    head = fig.data[0]
+    if isinstance(head, go.Pie):  # monochrome shades across slices, else leave default
+        scale = _PIE_SCALE.get(css)
+        labels = head.labels
+        if scale and labels is not None and len(labels):
+            stops = [i / max(len(labels) - 1, 1) for i in range(len(labels))]
+            fig.update_traces(marker=dict(colors=px.colors.sample_colorscale(scale, stops)))
+    elif isinstance(head, go.Bar):
+        fig.update_traces(marker_color=css)
+    else:  # Scatter (line / area)
+        fig.update_traces(line_color=css, marker_color=css)
+
+
+def _pie(df: pd.DataFrame, names: str, values: str, title: str,
+         max_slices: int = 10) -> go.Figure:
+    """Composition pie: drop ~zero slices, fold the long tail into 其他."""
+    d = df[[names, values]].copy()
+    d = d[d[values] > 1e-9].sort_values(values, ascending=False)
+    if len(d) > max_slices:
+        head = d.iloc[:max_slices]
+        tail = pd.DataFrame({names: ["其他"], values: [d.iloc[max_slices:][values].sum()]})
+        d = pd.concat([head, tail], ignore_index=True)
+    return px.pie(d, names=names, values=values, title=title)
+
+
+def build_chart(df: pd.DataFrame, title: str, *,
+                chart_type: str | None = None, color: str | None = None) -> go.Figure:
+    """chart_type / color override the question's own intent — used by the
+    in-place "改图" interaction (re-render same data with new params)."""
     if df.empty:
         return go.Figure()
     date_cols = [c for c in df.columns
                  if pd.api.types.is_datetime64_any_dtype(df[c]) or "date" in c.lower()]
     num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
     dim = _series_dimension(df, date_cols, num_cols)
+    y = num_cols[0] if num_cols else None
+    single_period = not date_cols or df[date_cols[0]].nunique() <= 1
 
-    if date_cols and num_cols:
-        x, y = date_cols[0], num_cols[0]
-        d = df.sort_values(x)
-        if dim and _is_compositional(df, y):
-            # composition over time → stacked area (行业/资产配置 等仓位结构演变).
-            keep = [c for c, g in d.groupby(dim) if g[y].abs().max() > 1e-9]
-            d = d[d[dim].isin(keep)]
-            fig = px.area(d, x=x, y=y, color=dim, title=title)
+    fig = None
+    # 1) honor an explicit chart-type (override > question intent), if feasible
+    want = chart_type or _requested_chart(title)
+    if y is not None:
+        if want == "pie" and dim and single_period:
+            fig = _pie(df, dim, y, title)
+        elif want == "scatter" and len(num_cols) >= 2:
+            fig = px.scatter(df, x=num_cols[0], y=num_cols[1], hover_name=dim, title=title)
+        elif want == "bar":
+            fig = px.bar(df, x=(dim or df.columns[0]), y=y, title=title)
+        elif want == "line":
+            x = date_cols[0] if date_cols else (dim or df.columns[0])
+            fig = px.line(df.sort_values(x), x=x, y=y,
+                          color=(dim if date_cols else None), title=title)
+        elif want == "area" and (date_cols or dim):
+            x = date_cols[0] if date_cols else df.columns[0]
+            fig = px.area(df.sort_values(x), x=x, y=y, color=dim, title=title)
+
+    # 2) else infer chart structure from the data shape
+    if fig is None:
+        if date_cols and num_cols:
+            x = date_cols[0]
+            d = df.sort_values(x)
+            if dim and _is_compositional(df, y):
+                # composition over time → stacked area (仓位结构演变).
+                keep = [c for c, g in d.groupby(dim) if g[y].abs().max() > 1e-9]
+                fig = px.area(d[d[dim].isin(keep)], x=x, y=y, color=dim, title=title)
+            else:
+                fig = px.line(d, x=x, y=y, color=dim, title=title)  # 净值走势/对比
+        elif len(num_cols) >= 2:
+            # two metrics, no time axis → scatter (风险-收益 等指标关系).
+            fig = px.scatter(df, x=num_cols[0], y=num_cols[1], hover_name=dim, title=title)
+        elif num_cols:
+            fig = px.bar(df, x=(dim or df.columns[0]), y=y, title=title)  # 排名/分解
         else:
-            # levels over time → overlaid lines, one per series (净值走势/对比).
-            fig = px.line(d, x=x, y=y, color=dim, title=title)
-    elif num_cols:
-        # no time axis → ranking / breakdown bar over the category.
-        x = dim if dim else df.columns[0]
-        fig = px.bar(df, x=x, y=num_cols[0], title=title)
-    else:
-        fig = go.Figure()
+            fig = go.Figure()
+    if color:
+        _apply_color(fig, color)
     fig.update_layout(template="plotly_white", font=dict(family="Microsoft YaHei"))
     return fig
 
