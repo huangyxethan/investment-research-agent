@@ -93,7 +93,7 @@ with st.sidebar:
 
 # --- 3. app (stateful: new query vs in-place chart edit) ---------------------
 st.title("投研数据智能体")
-st.caption("中国公募基金 · 自然语言问答　|　出图后可直接说「改成红色 / 换柱状图 / 换饼图」就地改图")
+st.caption("中国公募基金 · 自然语言问答")
 
 ss = st.session_state
 

@@ -237,7 +237,7 @@ JOIN (
 JOIN dim_fund d ON h.fund_code = d.fund_code
 LEFT JOIN dim_security s ON h.sec_code = s.sec_code
 WHERE h.is_full_holding;
-COMMENT ON VIEW   v_fund_holding_latest IS '每只基金【最新一期】全持仓的【个股】明细（含 fund_name、sec_name、申万一级 industry_l1、申万二级 industry_l2、个股 weight）。回答"最新重仓股/前N大/某基金持有哪些股票/某行业(一级或二级)里持有哪些个股(个股下钻)"用本视图。行业【层面】的配置/占比/排名/时序：一级用 v_fund_industry_alloc，二级用 v_fund_industry_l2_alloc（不要在本视图臆造 industry_weight 列）。指定具体报告期（如"2025年报"）才查 fact_holding。';
+COMMENT ON VIEW   v_fund_holding_latest IS '每只基金【最新一期】全持仓的【个股】明细（含 fund_name、sec_name、申万一级 industry_l1、申万二级 industry_l2、个股 weight）。回答"某基金最新持有哪些股票/某行业(一级或二级)里持有哪些个股(个股下钻)"用本视图。「前N大持仓/重仓股」（含最新与历年时序）请用 v_fund_top_holdings（holding_rank<=N）。行业【层面】的配置/占比/排名/时序：一级用 v_fund_industry_alloc，二级用 v_fund_industry_l2_alloc（不要在本视图臆造 industry_weight 列）。指定具体报告期（如"2025年报"）才查 fact_holding。';
 COMMENT ON COLUMN v_fund_holding_latest.weight      IS '该个股占基金净值比例（小数，0.05=5%）；按 industry_l1 或 industry_l2 汇总即对应层级的配置占比';
 COMMENT ON COLUMN v_fund_holding_latest.industry_l1 IS '所属申万一级行业；用 LIKE ''%关键词%'' 容忍简称（医药->医药生物）；NULL=港股/北交所/退市标的';
 COMMENT ON COLUMN v_fund_holding_latest.industry_l2 IS '所属申万二级行业（共131个，如 白酒Ⅱ、半导体、医疗器械、乘用车 等）；用 LIKE ''%关键词%'' 容忍简称及罗马数字后缀（"白酒"匹配"白酒Ⅱ"）；NULL=港股/北交所/退市标的';
@@ -283,6 +283,26 @@ FROM (
 COMMENT ON VIEW   v_fund_industry_l2_alloc IS '基金各报告期（半年报/年报全持仓）的申万【二级】行业配置，每(基金,报告期,二级行业)一行（含父级 industry_l1、is_latest 标志）。【二级行业】的配置/占比/排名/时序一律用本视图；【一级行业】用 v_fund_industry_alloc。最新截面/排名加 WHERE is_latest；时序不加；时间轴 report_date（无 period 列，近N年用 report_date 过滤）。industry_l2 用 LIKE 容忍简称及罗马数字后缀（"白酒"匹配"白酒Ⅱ"）。已排除未归类标的（港股/北交所）。';
 COMMENT ON COLUMN v_fund_industry_l2_alloc.is_latest      IS '是否为该基金最新一期；最新/排名加 WHERE is_latest，时序不加';
 COMMENT ON COLUMN v_fund_industry_l2_alloc.industry_weight IS '该报告期该申万二级行业占净值比例之和（小数，0.38=38%）';
+
+-- v_fund_top_holdings: per-stock holdings with a per-period RANK by weight, so
+-- "前N大持仓/重仓股" is a trivial WHERE holding_rank<=N instead of a window
+-- function the LLM tends to fake with a weight threshold. Carries is_latest so it
+-- serves both the latest top-N and the historical top-N time series (stacked).
+DROP VIEW IF EXISTS v_fund_top_holdings;
+CREATE VIEW v_fund_top_holdings AS
+SELECT h.fund_code, d.fund_name, h.report_date, h.sec_code, s.sec_name,
+       s.industry_l1, h.weight, h.market_value,
+       ROW_NUMBER() OVER (PARTITION BY h.fund_code, h.report_date
+                          ORDER BY h.weight DESC NULLS LAST) AS holding_rank,
+       (h.report_date = MAX(h.report_date) OVER (PARTITION BY h.fund_code)) AS is_latest
+FROM fact_holding h
+JOIN dim_fund d ON h.fund_code = d.fund_code
+LEFT JOIN dim_security s ON h.sec_code = s.sec_code
+WHERE h.is_full_holding;
+COMMENT ON VIEW   v_fund_top_holdings IS '基金各报告期全持仓个股，带每期按权重降序的排名 holding_rank 与 is_latest 标志。「前N大持仓/前N大重仓股」一律用 holding_rank<=N（前十大 holding_rank<=10、前五大 holding_rank<=5）；「最新前N大」再加 WHERE is_latest；「成立以来/历年前N大」不加 is_latest（时间序列，可作堆叠图）。含个股名 sec_name、所属申万一级 industry_l1。';
+COMMENT ON COLUMN v_fund_top_holdings.holding_rank IS '该个股在所属基金该报告期内按 weight 降序的名次，1=第一大重仓；「前N大」即 holding_rank<=N';
+COMMENT ON COLUMN v_fund_top_holdings.weight       IS '个股占基金净值比例（小数，0.05=5%）';
+COMMENT ON COLUMN v_fund_top_holdings.is_latest    IS '是否为该基金最新一期全持仓；看最新前N大加 WHERE is_latest，看历年时序则不加';
 
 -- =====================================================================
 -- 3. EQUITY ANALYTICS (HOT-PATH PRE-COMPUTED)

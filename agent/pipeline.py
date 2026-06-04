@@ -33,6 +33,7 @@ CONTEXT_TABLES = (
     "fact_nav",
     "v_fund_perf_latest",
     "v_fund_holding_latest",
+    "v_fund_top_holdings",
     "v_fund_industry_alloc",
     "v_fund_industry_l2_alloc",
     "fact_holding",
