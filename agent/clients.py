@@ -13,7 +13,10 @@ from abc import ABC, abstractmethod
 from dotenv import load_dotenv
 from openai import OpenAI
 
-load_dotenv()
+# override=True so a local .env wins over a stale/empty OS env var (e.g. an empty
+# ANTHROPIC_API_KEY pre-set in the system). On Streamlit Cloud there is no .env,
+# so this is a no-op and st.secrets-injected values stay intact.
+load_dotenv(override=True)
 
 
 class LLMClient(ABC):
