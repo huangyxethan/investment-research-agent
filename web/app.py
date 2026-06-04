@@ -40,7 +40,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 import streamlit_authenticator as stauth  # noqa: E402
 
-from agent.pipeline import ask  # noqa: E402
+from agent.pipeline import (  # noqa: E402
+    ask, build_chart, is_chart_edit, parse_chart_edit,
+)
 
 st.set_page_config(page_title="投研数据智能体", layout="wide")
 
@@ -89,35 +91,63 @@ with st.sidebar:
     st.caption(f"身份：{'管理员' if role == 'admin' else '访客'}（{role}）")
     authenticator.logout("退出登录", location="sidebar")
 
-# --- 3. app ------------------------------------------------------------------
+# --- 3. app (stateful: new query vs in-place chart edit) ---------------------
 st.title("投研数据智能体")
-st.caption("中国公募基金 · 自然语言问答")
+st.caption("中国公募基金 · 自然语言问答　|　出图后可直接说「改成红色 / 换柱状图 / 换饼图」就地改图")
+
+ss = st.session_state
 
 with st.form("ask"):
-    question = st.text_input("提问", "易方达蓝筹精选今年的单位净值走势")
-    submitted = st.form_submit_button("分析")
+    question = st.text_input("提问 / 改图指令", "易方达蓝筹精选今年的单位净值走势")
+    submitted = st.form_submit_button("发送")
 
 if submitted and question.strip():
-    with st.spinner("思考中…"):
-        try:
-            res = ask(question)
-        except Exception as e:
-            st.error(f"出错了：{e}")
-            st.stop()
+    if is_chart_edit(question):
+        if ss.get("last_df") is not None:
+            ov = dict(ss.get("chart_overrides", {}))
+            ov.update(parse_chart_edit(question))   # merge: color + type accumulate
+            ss["chart_overrides"] = ov
+        else:
+            st.warning("请先生成一张图，再用「改成红色 / 换柱状图」这类指令就地修改。")
+    else:
+        with st.spinner("思考中…"):
+            try:
+                res = ask(question)
+            except Exception as e:
+                st.error(f"出错了：{e}")
+                st.stop()
+        ss["last_df"] = res.df
+        ss["last_question"] = question
+        ss["last_sql"] = res.sql
+        ss["last_narrative"] = res.narrative
+        ss["chart_overrides"] = {}            # reset edits for the new chart
+
+# render current state every run (so an edit re-renders without re-querying)
+if ss.get("last_df") is not None:
+    df, q = ss["last_df"], ss["last_question"]
+    ov = ss.get("chart_overrides", {})
 
     st.markdown("### 分析")
-    st.write(res.narrative)
+    st.write(ss["last_narrative"])
 
-    if res.figure.data:
-        st.plotly_chart(res.figure, width='stretch')
+    fig = build_chart(df, q, chart_type=ov.get("chart_type"), color=ov.get("color"))
+    if fig.data:
+        st.plotly_chart(fig, width="stretch")
+        if ov:
+            bits = []
+            if ov.get("chart_type"):
+                bits.append(f"图型→{ov['chart_type']}")
+            if ov.get("color"):
+                bits.append(f"颜色→{ov['color']}")
+            st.caption("🎨 已就地修改：" + "，".join(bits) + "（基于同一份数据，未重新查询）")
     else:
         st.info("本次结果未生成图表，请见下方数据。")
 
     if role == "admin":
         with st.expander("生成的 SQL"):
-            st.code(res.sql, language="sql")
-        with st.expander(f"原始数据（{len(res.df)} 行）"):
-            st.dataframe(res.df, width='stretch')
+            st.code(ss["last_sql"], language="sql")
+        with st.expander(f"原始数据（{len(df)} 行）"):
+            st.dataframe(df, width="stretch")
     else:
-        with st.expander(f"数据（前 50 行，共 {len(res.df)} 行）"):
-            st.dataframe(res.df.head(50), width='stretch')
+        with st.expander(f"数据（前 50 行，共 {len(df)} 行）"):
+            st.dataframe(df.head(50), width="stretch")

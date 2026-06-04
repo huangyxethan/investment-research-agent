@@ -17,47 +17,63 @@ import plotly.graph_objects as go
 from agent.pipeline import build_chart, run_sql
 
 # (id, expected_kind, sql). expected_kind ∈ {line, area, bar}.
-CASES: list[tuple[str, str, str]] = [
-    ("nav_single", "line",
+# (id, expected_kind, title, sql). title is passed to build_chart, so it also
+# exercises the chart-type INTENT (a title with "扇形图" must yield a pie).
+CASES: list[tuple[str, str, str, str]] = [
+    ("nav_single", "line", "易方达蓝筹精选今年单位净值走势",
      "SELECT n.nav_date, n.unit_nav FROM fact_nav n JOIN dim_fund f "
      "ON n.fund_code=f.fund_code WHERE f.fund_name LIKE '%易方达蓝筹精选%' "
      "AND n.nav_date>='2026-01-01' ORDER BY n.nav_date"),
-    ("nav_compare", "line",
+    ("nav_compare", "line", "易方达蓝筹精选与华夏成长今年净值对比",
      "SELECT n.nav_date, f.fund_name, n.unit_nav FROM fact_nav n JOIN dim_fund f "
      "ON n.fund_code=f.fund_code WHERE (f.fund_name LIKE '%易方达蓝筹精选%' "
      "OR f.fund_name LIKE '%华夏成长%') AND n.nav_date>='2026-01-01' ORDER BY n.nav_date"),
     # the headline class this battery was created for: industry positions over
     # time → stacked area, one band per 申万 industry (was a garbage single line
     # before the renderer learned to infer the series dimension).
-    ("industry_over_time", "area",
+    ("industry_over_time", "area", "易方达蓝筹精选近年各申万行业仓位变化",
      "SELECT fh.report_date, ds.industry_l1, SUM(fh.weight) AS industry_weight "
      "FROM fact_holding fh JOIN dim_fund df ON fh.fund_code=df.fund_code "
      "JOIN dim_security ds ON fh.sec_code=ds.sec_code "
      "WHERE df.fund_name LIKE '%易方达蓝筹精选%' AND fh.report_date>='2022-01-01' "
      "AND fh.is_full_holding AND ds.industry_l1 IS NOT NULL "
      "GROUP BY fh.report_date, ds.industry_l1"),
-    ("ranking_bar", "bar",
+    ("ranking_bar", "bar", "今年以来收益率最高的基金排名",
      "SELECT f.fund_name, p.total_return FROM v_fund_perf_latest p JOIN dim_fund f "
      "ON p.fund_code=f.fund_code WHERE p.period='YTD' ORDER BY p.total_return DESC LIMIT 10"),
+    # chart-type INTENT: an explicit 扇形图 request must override the default bar.
+    ("industry_pie", "pie", "易方达蓝筹精选最新一期行业配置（用扇形图展示）",
+     "SELECT industry_l1, industry_weight FROM v_fund_industry_alloc "
+     "WHERE fund_name LIKE '%易方达蓝筹精选%' AND is_latest ORDER BY industry_weight DESC"),
+    # two metrics, no time axis → scatter (风险-收益), even without a keyword.
+    ("risk_return_scatter", "scatter", "所有基金今年以来年化收益率与波动率",
+     "SELECT fund_name, annual_return, volatility FROM v_fund_perf_latest WHERE period='YTD'"),
 ]
 
 
 def chart_kind(fig: go.Figure) -> tuple[str, int]:
-    """Classify a figure into {empty, bar, area, line} + trace count."""
+    """Classify a figure into {empty, bar, pie, area, scatter, line} + trace count."""
     if not fig.data:
         return "empty", 0
     if isinstance(fig.data[0], go.Bar):
         return "bar", len(fig.data)
-    stacked = any(getattr(tr, "stackgroup", None) for tr in fig.data)
-    return ("area" if stacked else "line"), len(fig.data)
+    if isinstance(fig.data[0], go.Pie):
+        return "pie", len(fig.data)
+    # Scatter family: area (stacked fill) / scatter (markers) / line (lines).
+    if any(getattr(tr, "stackgroup", None) for tr in fig.data):
+        return "area", len(fig.data)
+    mode = getattr(fig.data[0], "mode", "") or ""
+    if "markers" in mode and "lines" not in mode:
+        return "scatter", len(fig.data)
+    return "line", len(fig.data)
 
 
 def main() -> int:
     passed = 0
-    for cid, expected, sql in CASES:
+    for cid, expected, title, sql in CASES:
         try:
             df = run_sql(sql)
-            kind, n = chart_kind(build_chart(df, cid))
+            kind, n = chart_kind(build_chart(df, title))
             ok = kind == expected
             detail = f"kind={kind} traces={n} rows={len(df)}"
         except Exception as e:
