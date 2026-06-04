@@ -297,6 +297,12 @@ def build_chart(df: pd.DataFrame, title: str, *,
                 # composition over time → stacked area (仓位结构演变).
                 keep = [c for c, g in d.groupby(dim) if g[y].abs().max() > 1e-9]
                 fig = px.area(d[d[dim].isin(keep)], x=x, y=y, color=dim, title=title)
+            elif not dim and len(num_cols) >= 2:
+                # wide result: several measures over time → melt → multi-line
+                # (e.g. top5_weight + top10_weight 同图对比).
+                dm = d.melt(id_vars=[x], value_vars=num_cols,
+                            var_name="指标", value_name="值")
+                fig = px.line(dm, x=x, y="值", color="指标", title=title)
             else:
                 fig = px.line(d, x=x, y=y, color=dim, title=title)  # 净值走势/对比
         elif len(num_cols) >= 2:
@@ -328,7 +334,8 @@ _SPEC_SYS = """你是图表规格生成器。根据【用户问题】和【数�
 JSON 字段（schema）：
 - chart_type: "line"|"bar"|"area"|"pie"|"scatter"
 - x: 列名（pie 表示扇区类别，scatter/line/bar 的横轴；x/y 取值必须是给定列名之一）
-- y: 列名（pie 表示数值，其余为纵轴数值）
+- y: 列名，或列名【列表】（pie 表示数值；line/area/bar 若要同图对比多个数值列，
+     y 用列表，如 ["top5_weight","top10_weight"]，每列会成为一条序列）
 - color: 列名 或 null（按该列分组着色，如按基金类型/行业分色；散点可按某指标着色）
 - size: 列名 或 null（仅 scatter，气泡大小，须为非负数值列）
 - orientation: "v" 或 "h"（仅 bar；条目多/名称长时用 "h" 横向更易读）
@@ -365,7 +372,11 @@ def _validate_spec(spec, df: pd.DataFrame) -> bool:
     if spec.get("chart_type") not in _CHART_TYPES:
         return False
     cols = set(df.columns)
-    if spec.get("x") not in cols or spec.get("y") not in cols:
+    if spec.get("x") not in cols:
+        return False
+    ys = spec.get("y")
+    ys = ys if isinstance(ys, list) else [ys]   # y may be one column or a list
+    if not ys or any(c not in cols for c in ys):
         return False
     for f in ("color", "size"):
         v = spec.get(f)
@@ -377,13 +388,22 @@ def _validate_spec(spec, df: pd.DataFrame) -> bool:
 def render_spec(df: pd.DataFrame, spec: dict, *, recolor: str | None = None) -> go.Figure:
     """Render a validated chart spec to a Plotly figure (the single renderer)."""
     t = spec["chart_type"]
-    x, y = spec["x"], spec["y"]
+    x = spec["x"]
+    ys = spec["y"] if isinstance(spec["y"], list) else [spec["y"]]
     color, size = spec.get("color"), spec.get("size")
     title = spec.get("title") or ""
     d = df
     srt = spec.get("sort")
     if isinstance(srt, dict) and srt.get("by") in d.columns:
         d = d.sort_values(srt["by"], ascending=(srt.get("dir") == "asc"))
+
+    # multiple measures (wide result, e.g. top5_weight + top10_weight) → melt to
+    # long so each column becomes its own series; the measure name is the color.
+    if len(ys) > 1 and t in ("line", "area", "bar"):
+        d = d.melt(id_vars=[x], value_vars=ys, var_name="指标", value_name="值")
+        y, color = "值", "指标"
+    else:
+        y = ys[0]
 
     if t == "pie":
         fig = _pie(d, x, y, title)

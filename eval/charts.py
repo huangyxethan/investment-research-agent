@@ -88,6 +88,14 @@ SPEC_CASES: list[tuple[str, str, str, dict]] = [
      "WHERE fund_name LIKE '%易方达蓝筹精选%' AND report_date>='2023-06-01'",
      {"chart_type": "area", "x": "report_date", "y": "industry_weight",
       "color": "industry_l1", "normalize": "percent", "title": "行业占比演变"}),
+    # wide result (CR5/CR10 集中度) → y as a LIST → two series via melt.
+    ("spec_multi_y", "line",
+     "SELECT report_date, SUM(CASE WHEN holding_rank<=5 THEN weight ELSE 0 END) AS top5_weight, "
+     "SUM(CASE WHEN holding_rank<=10 THEN weight ELSE 0 END) AS top10_weight "
+     "FROM v_fund_top_holdings WHERE fund_name LIKE '%易方达蓝筹精选%' AND holding_rank<=10 "
+     "GROUP BY report_date",
+     {"chart_type": "line", "x": "report_date",
+      "y": ["top5_weight", "top10_weight"], "title": "前五大/前十大集中度"}),
 ]
 
 
