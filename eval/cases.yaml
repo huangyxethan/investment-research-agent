@@ -20,6 +20,10 @@
 - {id: hold_top_1,    class: holding, mode: values,   question: "易方达蓝筹精选2025年报的前十大重仓股", expect: ["贵州茅台"]}
 - {id: hold_top_2,    class: holding, mode: nonempty, question: "萧楠管理的易方达消费行业最新重仓了哪些股票"}
 - {id: hold_count,    class: holding, mode: nonempty, question: "易方达蓝筹精选最新一期全部持仓有多少只股票"}
+# top-N via v_fund_top_holdings.holding_rank (NOT a weight threshold). ts case
+# must span periods (the "2024" pins time-series, not a single snapshot).
+- {id: hold_topn_ts,  class: holding, mode: values,   question: "易方达蓝筹精选成立以来每期前十大重仓股", expect: ["贵州茅台", "2024"]}
+- {id: hold_top5_now, class: holding, mode: values,   question: "易方达蓝筹精选最新前五大重仓股", expect: ["腾讯控股"]}
 
 - {id: meta_type,     class: meta,    mode: values,   question: "各类型基金各有多少只",   expect: ["混合型"]}
 - {id: meta_inception,class: meta,    mode: values,   question: "易方达蓝筹精选是什么时候成立的", expect: ["2018"]}
