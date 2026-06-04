@@ -46,6 +46,18 @@ The system must also support **iterative chart modification** through follow-up 
 
 These belong to V2 and are documented in Section 16.
 
+### 1.4 Mid-Term Review Feedback (2026-06-03)
+
+Three steering corrections from the mid-term checkpoint with company leadership. Each is mapped to where it is actioned elsewhere in this document, so the corrections stay traceable rather than orphaned.
+
+**F1 — Lead with the build/architecture; analysis results are secondary.** Leadership cares most about *how the system is engineered* — the layered design, the logic, and **why each layer chose its method over the alternative** — and treats analytical output as supporting evidence. → Defense framing: Part 1 (Genie 对标) plus the layer-by-layer "what + why" of §3 / §6 / §7 / §8 is the main course; demo charts illustrate, they do not headline. Every layer in the deck must explicitly answer "why this method, not X." Reinforces D1 and §1.1.
+
+**F2 — Headline analytical capability = classification-driven complex queries with dual table + chart output.** The query class to showcase is *aggregate-over-a-category returning both a table and a chart simultaneously*, e.g. "易方达旗下所有基金近一年的年化收益率" → **table** (every 易方达 fund's 1Y annualized return) **+ chart** (a multi-line NAV-trend chart of those same funds). → The pipeline already emits table + chart together (§9); the gaps are (a) the classification fields to slice on (F3) and (b) promoting this query *shape* to a Core-ring eval case (§6.2) and a hero demo. Note: today "所有易方达基金" only resolves via `fund_name LIKE '%易方达%'` — there is no 管理人/基金公司 dimension yet (addressed in F3).
+
+**F3 — Enrich classification dimensions and add scale data.** Leadership wants more dimensional richness: **策略分类** (strategy), **交易标的分类** (asset / underlying class), and **规模 (AUM)**. → Schema actions:
+- Extend `dim_fund` beyond its single `fund_type` column. Rather than hardcode more columns, introduce a `dim_fund_tag (fund × tag_type × tag_value)` bridge so new 分类 (策略 / 标的 / 管理人 / 风格 …) grow **without DDL changes** — consistent with the extensibility-first discipline (§11) and the earlier "标签越多越好" steer. A `fund_company`/管理人 tag is the specific unlock for F2.
+- `dim_fund_scale` (AUM, share, holder count) already exists in the schema (§5.1) but is **unpopulated**; its ETL is promoted from "planned" to **near-term V1** (§13), since scale is now an explicit ask.
+
 ---
 
 ## 2. Strategic Decisions — Locked In
@@ -152,7 +164,8 @@ The schema is intentionally **wide**: it includes tables for every asset class e
 
 | Table | Grain | Purpose | V1 Population |
 |---|---|---|---|
-| `dim_fund` | one row per fund | Basic info: type, inception, benchmark, currency | ✓ Full |
+| `dim_fund` | one row per fund | Basic info: type, inception, benchmark, currency; richer 分类 via `dim_fund_tag` (see §1.4 F3) | ✓ Full |
+| `dim_fund_tag` | fund × tag_type × tag_value | Extensible 分类标签: 策略 / 交易标的 / 管理人(基金公司) / 风格 — grows without DDL | ◑ V1-next (§1.4 F3) |
 | `dim_manager` | one row per manager | Manager profile | ✓ Full |
 | `bridge_fund_manager` | fund × manager × tenure (SCD2) | Historical management mapping | ✓ Full |
 | `dim_security` | one row per security | Stocks, bonds, futures contracts | ✓ Full (stocks) |
@@ -161,7 +174,7 @@ The schema is intentionally **wide**: it includes tables for every asset class e
 | `fact_holding` | fund × report_date × sec | Quarterly disclosed holdings | ✓ Full |
 | `fact_nav` | fund × nav_date | Unit NAV, accumulated NAV, daily return | ✓ Full |
 | `fact_fund_perf` | fund × period × as_of_date | Pre-computed Sharpe, drawdown, vol | ✓ Full |
-| `dim_fund_scale` | fund × report_date | AUM, share, holder count | ✓ Full |
+| `dim_fund_scale` | fund × report_date | AUM, share, holder count | ◑ V1-next (§1.4 F3): schema present, ETL pending |
 | `dim_fee` | one row per fund | Mgmt / custodian / sub / redemption | ✓ Full |
 
 ### 5.2 Equity Analytics (Hot-Path Pre-Computed)
