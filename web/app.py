@@ -41,7 +41,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import streamlit_authenticator as stauth  # noqa: E402
 
 from agent.pipeline import (  # noqa: E402
-    ask, build_chart, is_chart_edit, parse_chart_edit,
+    ask, build_chart, is_chart_edit, parse_chart_edit, render_spec,
 )
 
 st.set_page_config(page_title="投研数据智能体", layout="wide")
@@ -120,17 +120,31 @@ if submitted and question.strip():
         ss["last_question"] = question
         ss["last_sql"] = res.sql
         ss["last_narrative"] = res.narrative
+        ss["last_spec"] = res.spec            # Tier-3 spec (None → Tier-2 fallback)
         ss["chart_overrides"] = {}            # reset edits for the new chart
 
 # render current state every run (so an edit re-renders without re-querying)
 if ss.get("last_df") is not None:
     df, q = ss["last_df"], ss["last_question"]
     ov = ss.get("chart_overrides", {})
+    spec = ss.get("last_spec")
 
     st.markdown("### 分析")
     st.write(ss["last_narrative"])
 
-    fig = build_chart(df, q, chart_type=ov.get("chart_type"), color=ov.get("color"))
+    # edits patch the spec (Tier-3); fall back to Tier-2 build_chart if no spec
+    # or if the patched spec fails to render.
+    fig = None
+    if spec:
+        s = dict(spec)
+        if ov.get("chart_type"):
+            s["chart_type"] = ov["chart_type"]
+        try:
+            fig = render_spec(df, s, recolor=ov.get("color"))
+        except Exception:
+            fig = None
+    if fig is None:
+        fig = build_chart(df, q, chart_type=ov.get("chart_type"), color=ov.get("color"))
     if fig.data:
         st.plotly_chart(fig, width="stretch")
         if ov:

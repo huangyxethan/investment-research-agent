@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import plotly.graph_objects as go
 
-from agent.pipeline import build_chart, run_sql
+from agent.pipeline import build_chart, render_spec, run_sql
 
 # (id, expected_kind, sql). expected_kind ∈ {line, area, bar}.
 # (id, expected_kind, title, sql). title is passed to build_chart, so it also
@@ -68,9 +68,33 @@ def chart_kind(fig: go.Figure) -> tuple[str, int]:
     return "line", len(fig.data)
 
 
+# Tier-3 renderer (render_spec) — hand-written specs → expected kind, no LLM.
+# Pins the declarative path incl. rich encodings (color/orientation/normalize).
+# (id, expected_kind, sql, spec)
+SPEC_CASES: list[tuple[str, str, str, dict]] = [
+    ("spec_scatter_color", "scatter",
+     "SELECT fund_name, annual_return, volatility, sharpe FROM v_fund_perf_latest "
+     "WHERE period='YTD'",
+     {"chart_type": "scatter", "x": "volatility", "y": "annual_return",
+      "color": "sharpe", "title": "风险-收益（夏普着色）"}),
+    ("spec_bar_horizontal", "bar",
+     "SELECT industry_l1, industry_weight FROM v_fund_industry_alloc "
+     "WHERE fund_name LIKE '%易方达蓝筹精选%' AND is_latest",
+     {"chart_type": "bar", "x": "industry_l1", "y": "industry_weight",
+      "orientation": "h", "sort": {"by": "industry_weight", "dir": "desc"},
+      "title": "行业配置"}),
+    ("spec_area_percent", "area",
+     "SELECT report_date, industry_l1, industry_weight FROM v_fund_industry_alloc "
+     "WHERE fund_name LIKE '%易方达蓝筹精选%' AND report_date>='2023-06-01'",
+     {"chart_type": "area", "x": "report_date", "y": "industry_weight",
+      "color": "industry_l1", "normalize": "percent", "title": "行业占比演变"}),
+]
+
+
 def main() -> int:
-    passed = 0
+    passed = total = 0
     for cid, expected, title, sql in CASES:
+        total += 1
         try:
             df = run_sql(sql)
             kind, n = chart_kind(build_chart(df, title))
@@ -79,12 +103,25 @@ def main() -> int:
         except Exception as e:
             ok, detail = False, f"{type(e).__name__}: {e}"
         passed += ok
-        print(f"  [{'PASS' if ok else 'FAIL'}] {cid:20s} expect={expected:5s} — {detail}")
+        print(f"  [{'PASS' if ok else 'FAIL'}] {cid:22s} expect={expected:7s} — {detail}")
+
+    print("  --- Tier-3 render_spec ---")
+    for cid, expected, sql, spec in SPEC_CASES:
+        total += 1
+        try:
+            df = run_sql(sql)
+            kind, n = chart_kind(render_spec(df, spec))
+            ok = kind == expected
+            detail = f"kind={kind} traces={n} rows={len(df)}"
+        except Exception as e:
+            ok, detail = False, f"{type(e).__name__}: {e}"
+        passed += ok
+        print(f"  [{'PASS' if ok else 'FAIL'}] {cid:22s} expect={expected:7s} — {detail}")
 
     print("\n" + "=" * 56)
-    print(f"  CHARTS : {passed}/{len(CASES)}")
+    print(f"  CHARTS : {passed}/{total}")
     print("=" * 56)
-    return 1 if passed < len(CASES) else 0
+    return 1 if passed < total else 0
 
 
 if __name__ == "__main__":
