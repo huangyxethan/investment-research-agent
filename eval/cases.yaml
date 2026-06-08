@@ -6,12 +6,20 @@
 #   nonempty  -> generated SQL executes and returns >=1 row
 #   rowcount  -> exact number of rows
 #   values    -> every string in `expect` appears somewhere in the result
+#   min_date  -> earliest date in the result >= expect (catches the AND/OR
+#               precedence bug: a shared date filter binding only to the last
+#               OR term, leaking full history into a "今年以来" comparison)
 #
 # class tags group results so we can see WHICH capability is weak.
 
 - {id: nav_trend_1,   class: nav,     mode: nonempty, question: "易方达蓝筹精选今年的单位净值走势"}
 - {id: nav_trend_2,   class: nav,     mode: nonempty, question: "兴全合润成立以来的净值表现"}
-- {id: nav_compare,   class: nav,     mode: nonempty, question: "对比易方达蓝筹精选和华夏成长今年的净值走势"}
+# nav_compare* were nonempty (false-pass): the AND/OR precedence bug returns full
+# history but is non-empty. min_date makes it a tracked RED until the Round-2
+# few-shot retriever teaches the parenthesised multi-fund pattern (gold exemplar
+# in training_data/qsql/nav_trend.yaml). Known-failing by design until then.
+- {id: nav_compare,   class: nav,     mode: min_date, expect: "2026-01-01", question: "对比易方达蓝筹精选和华夏成长今年以来的净值走势"}
+- {id: nav_compare3,  class: nav,     mode: min_date, expect: "2026-01-01", question: "对比易方达蓝筹精选、华夏成长和兴全合润今年以来的单位净值走势，用折线图展示"}
 
 - {id: mgr_funds_1,   class: manager, mode: values,   question: "张坤管理了哪些基金",      expect: ["蓝筹", "优质精选"]}
 - {id: mgr_funds_2,   class: manager, mode: values,   question: "葛兰目前管的基金有哪些",    expect: ["中欧医疗"]}

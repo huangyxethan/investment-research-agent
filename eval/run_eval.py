@@ -28,6 +28,15 @@ def check(mode: str, expect, df) -> bool:
     if mode == "values":
         blob = df.to_string()
         return all(str(v) in blob for v in (expect or []))
+    if mode == "min_date":
+        # earliest date in the result must be >= expect. Catches the AND/OR
+        # precedence bug where a shared date filter only binds to the last OR
+        # term, leaking full history into a "今年以来" comparison.
+        import pandas as pd
+        dcols = [c for c in df.columns if "date" in c.lower()]
+        if df.empty or not dcols:
+            return False
+        return pd.to_datetime(df[dcols[0]]).min() >= pd.Timestamp(str(expect))
     raise ValueError(f"unknown mode {mode}")
 
 

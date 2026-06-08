@@ -92,6 +92,7 @@ _SQL_SYS = """你是一个面向中国公募基金数据库的 PostgreSQL SQL �
   但该列只放类别【名称本身】（'易方达'/'广发'），绝不附带颜色或样式。
 - 基金名称在 dim_fund.fund_name，净值在 fact_nav，按 fund_code 关联。
 - 基金/股票名称一律用模糊匹配 `fund_name LIKE '%关键词%'`：用户常用简称，而库里存的是全称（如"易方达蓝筹精选混合"）。经理名 dim_manager.manager_name 用精确匹配即可。
+- 对比/筛选【多个】基金时，多个 `fund_name LIKE` 用 OR 连接后【必须整体加括号】，再与日期等其它条件 AND，例如 `WHERE (fund_name LIKE '%A%' OR fund_name LIKE '%B%') AND nav_date >= '2026-01-01'`。否则 AND 优先级高于 OR，日期等条件只会作用到最后一个名字。
 - 全持仓分析（如重仓股、行业、Brinson）只用 fact_holding.is_full_holding = TRUE（中报/年报全持仓）。
 - 业绩指标（收益率/年化/夏普/最大回撤/波动率/按业绩排名）按【区间类型】分两条路，绝不混用：
   · 【固定区间】今年以来=YTD / 近一年=1Y / 近三年=3Y / 成立以来=SI → 查视图 v_fund_perf_latest 按 period 选，不要按日期过滤、不要用 fact_nav 现算。
@@ -100,6 +101,7 @@ _SQL_SYS = """你是一个面向中国公募基金数据库的 PostgreSQL SQL �
       SELECT d.fund_name, m.sharpe FROM dim_fund d,
         LATERAL f_fund_perf_range(d.fund_code, '2023-01-01', CURRENT_DATE) m
       WHERE d.fund_name LIKE '%易方达%' ORDER BY m.sharpe;
+    （上面 `dim_fund + LATERAL` 写法【仅用于调用 f_fund_perf_range】，不要把 LATERAL/CROSS JOIN 这种结构套到其它查询。）
 - 日期格式 'YYYY-MM-DD'。今天是 {today}。"今年"指 nav_date >= '{year}-01-01'。
 - 净值表没有非交易日的行（元旦、周末等），**切勿假设某个确切日期存在并用等值连接**。
   计算区间收益时：「年初/期初」取区间内最早交易日的净值，「最新/当前」取 MAX(nav_date) 的净值；
@@ -144,14 +146,37 @@ _NARR_SYS = """你是一名投研分析师。根据提供的查询结果，用�
 只能使用结果中实际出现的数字，禁止编造。语气专业、简洁。"""
 
 
+def _narrate_sample(df: pd.DataFrame) -> str:
+    """A REPRESENTATIVE text sample for narration. Plain head/tail misses MIDDLE
+    groups in a multi-series result (e.g. the middle fund in a 3-fund compare),
+    making the LLM falsely claim "数据未提供". So when the result splits into
+    groups, include EVERY group — its first+last row (start/end for a time
+    series), which is exactly what a comparison narrative needs."""
+    if len(df) <= 12:
+        return df.to_string(index=False)
+    date_cols = [c for c in df.columns
+                 if pd.api.types.is_datetime64_any_dtype(df[c]) or "date" in c.lower()]
+    num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+    cat = _series_dimension(df, date_cols, num_cols)
+    if cat and 1 < df[cat].nunique() <= 20:
+        parts = []
+        for _, g in df.groupby(cat, sort=False):
+            parts.append(g.head(1))
+            if len(g) > 1:
+                parts.append(g.tail(1))
+        return pd.concat(parts).to_string(index=False)
+    # single series / no clear grouping: start + end is representative
+    return (df.head(8).to_string(index=False) + "\n…\n"
+            + df.tail(3).to_string(index=False))
+
+
 def narrate(question: str, df: pd.DataFrame, llm: LLMClient) -> str:
     if df.empty:
         return "查询无结果。"
-    head = df.head(8).to_string(index=False)
-    tail = df.tail(3).to_string(index=False) if len(df) > 8 else ""
     payload = (
         f"问题：{question}\n行数：{len(df)}\n列：{list(df.columns)}\n"
-        f"前几行：\n{head}\n" + (f"末几行：\n{tail}\n" if tail else "")
+        f"数据样本（多序列时每个序列给首尾行，请覆盖样本中出现的每一个序列）：\n"
+        f"{_narrate_sample(df)}\n"
     )
     return llm.complete(_NARR_SYS, payload, max_tokens=400).strip()
 
