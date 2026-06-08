@@ -221,6 +221,58 @@ COMMENT ON COLUMN v_fund_perf_latest.period       IS '区间：YTD(今年以来)
 COMMENT ON COLUMN v_fund_perf_latest.total_return IS '区间累计收益率（小数，0.60=60%）';
 COMMENT ON COLUMN v_fund_perf_latest.max_drawdown IS '最大回撤（正数，0.48=回撤48%）';
 
+-- f_fund_perf_range: the DYNAMIC sibling of fact_fund_perf. The pre-computed table
+-- only carries FIXED buckets (YTD/1Y/3Y/SI); an arbitrary range ("2023年以来",
+-- "过去18个月") has no bucket, so the agent must NOT collapse it to the nearest
+-- fixed period (silently wrong) NOR hand-derive the math (the 283.6% bug). This
+-- encodes the SAME 口径 as etl/compute_fund_perf.py — once — and is called with an
+-- explicit start/end: fixed periods stay materialised for speed, custom ranges
+-- compute on demand from acc_nav. rf=0; 复权 acc_nav; 252 交易日.
+CREATE OR REPLACE FUNCTION f_fund_perf_range(
+    p_fund_code char(6), p_start date, p_end date)
+RETURNS TABLE(total_return numeric, annual_return numeric, sharpe numeric,
+              max_drawdown numeric, volatility numeric)
+LANGUAGE sql STABLE AS $func$
+WITH w AS (
+    SELECT nav_date, acc_nav
+    FROM fact_nav
+    WHERE fund_code = p_fund_code AND acc_nav IS NOT NULL
+      AND nav_date BETWEEN p_start AND p_end
+),
+r AS (
+    SELECT acc_nav,
+           acc_nav / NULLIF(LAG(acc_nav) OVER (ORDER BY nav_date), 0) - 1 AS ret,
+           MAX(acc_nav) OVER (ORDER BY nav_date) AS runmax
+    FROM w
+),
+agg AS (
+    SELECT (SELECT acc_nav FROM w ORDER BY nav_date DESC LIMIT 1)
+             / NULLIF((SELECT acc_nav FROM w ORDER BY nav_date ASC LIMIT 1), 0) - 1 AS total,
+           count(ret)        AS n_ret,    -- 收益序列长度 = 窗口交易日 - 1
+           avg(ret)          AS mean_r,
+           stddev_samp(ret)  AS sd_r,     -- 样本标准差，与 pandas .std() (ddof=1) 一致
+           min(acc_nav / NULLIF(runmax, 0) - 1) AS mdd
+    FROM r
+)
+SELECT
+    round(total, 6),
+    CASE WHEN n_ret > 0 AND total > -1
+         THEN round(power(1 + total, 252.0 / n_ret) - 1, 6) END,    -- 年化 = (1+total)^(252/n)-1
+    CASE WHEN sd_r > 0 THEN round(mean_r / sd_r * sqrt(252::numeric), 4) END,
+    round(abs(mdd), 6),
+    CASE WHEN n_ret > 1 THEN round(sd_r * sqrt(252::numeric), 6) END
+FROM agg;
+$func$;
+COMMENT ON FUNCTION f_fund_perf_range(char, date, date) IS
+'【任意自定义区间】业绩指标，从 fact_nav 累计净值按权威口径实时计算（与 fact_fund_perf 一致）：
+ total_return/annual_return/sharpe/max_drawdown/volatility。仅用于【非固定区间】——具体年份
+ (如"2023年以来"=start 2023-01-01)、具体起止日期、过去N个月/N年；固定区间(今年以来/近一年/
+ 近三年/成立以来)仍用 v_fund_perf_latest。区间末未指定时取至今(CURRENT_DATE)。
+ 推荐调用(LATERAL 一次得全部指标)：
+   SELECT d.fund_name, m.sharpe
+   FROM dim_fund d, LATERAL f_fund_perf_range(d.fund_code, ''2023-01-01'', CURRENT_DATE) m
+   WHERE d.fund_name LIKE ''%易方达%'' ORDER BY m.sharpe;';
+
 -- Two complementary holding surfaces, clean separation of duties:
 --   v_fund_holding_latest  = INDIVIDUAL STOCKS in each fund's latest snapshot
 --   v_fund_industry_alloc  = INDUSTRY-level weights (all periods + is_latest flag)

@@ -42,6 +42,19 @@
 - {id: met_sharpe,    class: metric,  mode: values,   question: "成立以来夏普比率最高的三只基金", expect: ["永赢科技智选"]}
 - {id: met_vol,       class: metric,  mode: nonempty, question: "成立以来波动率最低的基金是哪只"}
 
+# --- metric_range class: ARBITRARY date ranges that have NO fixed bucket. The
+# bug being guarded: agent mapped "2023年以来" → period='1Y' (silently wrong).
+# Must route to f_fund_perf_range(...) (same 口径, computed from fact_nav), NOT
+# the nearest YTD/1Y/3Y/SI. The value-checked cases are the real guard:
+#   mr_date_span uses a FIXED window → fully stable oracle (-0.0914); the wrong
+#   bucket answers (YTD -0.16 / 1Y -0.12 / 3Y -0.18) all FAIL the "-0.09" check.
+# mr_since_year/mr_lastNmonths stay nonempty (end=today drifts → no stable value);
+# correctness is pinned by mr_date_span + the 005827 SI 口径 cross-check.
+- {id: mr_since_year,  class: metric_range, mode: nonempty, question: "易方达各基金2023年以来的夏普比率分别是多少"}
+- {id: mr_year_rank,   class: metric_range, mode: values,   question: "2023年以来年化收益率最高的基金是哪只", expect: ["永赢科技智选"]}
+- {id: mr_lastNmonths, class: metric_range, mode: nonempty, question: "华夏成长过去18个月的最大回撤"}
+- {id: mr_date_span,   class: metric_range, mode: values,   question: "易方达蓝筹精选2023-06-01到2024-12-31的累计收益率", expect: ["-0.09"]}
+
 # --- industry class (申万一级): fact_holding JOIN dim_security on sec_code,
 # full holdings only. Oracles re-derived from live data (中欧医疗 ~93% in
 # 医药生物; 蓝筹 top industry 食品饮料). Includes a paraphrase + a 简称 test

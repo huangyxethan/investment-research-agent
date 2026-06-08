@@ -96,7 +96,36 @@ SPEC_CASES: list[tuple[str, str, str, dict]] = [
      "GROUP BY report_date",
      {"chart_type": "line", "x": "report_date",
       "y": ["top5_weight", "top10_weight"], "title": "前五大/前十大集中度"}),
+    # per-category color instruction ("易方达蓝、广发红"). The GROUP column 基金公司
+    # is DATA (derived in SQL); the COLORS are PRESENTATION (spec color_map). This
+    # is the corrected shape of the "chart_color in SQL" bug — colors never in SQL.
+    ("spec_color_map", "bar",
+     "SELECT fund_name, annual_return, "
+     "CASE WHEN fund_name LIKE '%易方达%' THEN '易方达' "
+     "WHEN fund_name LIKE '%广发%' THEN '广发' END AS 基金公司 "
+     "FROM v_fund_perf_latest WHERE period='YTD' "
+     "AND (fund_name LIKE '%易方达%' OR fund_name LIKE '%广发%')",
+     {"chart_type": "bar", "x": "fund_name", "y": "annual_return", "color": "基金公司",
+      "color_map": {"易方达": "蓝色", "广发": "红色"}, "title": "易方达vs广发年化收益"}),
 ]
+
+
+def color_map_fidelity() -> bool:
+    """Offline (no DB/LLM) check that a spec color_map renders the ACTUAL requested
+    colors — guards the presentation-layer color path that fixed the SQL-color bug.
+    Kept DB-free so it runs even when only the renderer changed."""
+    import pandas as pd
+    df = pd.DataFrame({
+        "fund_name": ["易方达蓝筹", "易方达远见", "广发先进", "广发电子"],
+        "annual_return": [-0.0037, 0.0371, 0.0202, 0.0172],
+        "基金公司": ["易方达", "易方达", "广发", "广发"],
+    })
+    spec = {"chart_type": "bar", "x": "fund_name", "y": "annual_return",
+            "color": "基金公司", "color_map": {"易方达": "蓝色", "广发": "红色"},
+            "title": "x"}
+    fig = render_spec(df, spec)
+    colors = {tr.name: tr.marker.color for tr in fig.data}
+    return colors.get("易方达") == "blue" and colors.get("广发") == "red"
 
 
 def main() -> int:
@@ -125,6 +154,16 @@ def main() -> int:
             ok, detail = False, f"{type(e).__name__}: {e}"
         passed += ok
         print(f"  [{'PASS' if ok else 'FAIL'}] {cid:22s} expect={expected:7s} — {detail}")
+
+    print("  --- color_map fidelity (offline) ---")
+    total += 1
+    try:
+        ok = color_map_fidelity()
+        detail = "易方达=blue, 广发=red" if ok else "colors NOT honored"
+    except Exception as e:
+        ok, detail = False, f"{type(e).__name__}: {e}"
+    passed += ok
+    print(f"  [{'PASS' if ok else 'FAIL'}] {'spec_color_fidelity':22s} expect={'colors':7s} — {detail}")
 
     print("\n" + "=" * 56)
     print(f"  CHARTS : {passed}/{total}")

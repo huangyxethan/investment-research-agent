@@ -85,10 +85,21 @@ _SQL_SYS = """你是一个面向中国公募基金数据库的 PostgreSQL SQL �
 规则：
 - 只输出一条 SELECT 语句，不要 markdown、不要解释、不要代码围栏。
 - 严格使用给定 schema 中的表名和列名。
+- 只返回【数据】，绝不要把【展示意图】写进 SQL：颜色、图表类型、样式都不能出现在 SELECT 里
+  （禁止写 CASE WHEN ... THEN '蓝色' / '红色'，也不要造 chart_color、color 之类的列）——这些一律交给可视化层。
+- 若问题隐含【分组/分类】（如"易方达和广发的基金【分别】…"按基金公司分组），可以返回一个【分类名称】列
+  （如从 fund_name 派生出 基金公司：CASE WHEN fund_name LIKE '%易方达%' THEN '易方达' ... AS 基金公司），
+  但该列只放类别【名称本身】（'易方达'/'广发'），绝不附带颜色或样式。
 - 基金名称在 dim_fund.fund_name，净值在 fact_nav，按 fund_code 关联。
 - 基金/股票名称一律用模糊匹配 `fund_name LIKE '%关键词%'`：用户常用简称，而库里存的是全称（如"易方达蓝筹精选混合"）。经理名 dim_manager.manager_name 用精确匹配即可。
 - 全持仓分析（如重仓股、行业、Brinson）只用 fact_holding.is_full_holding = TRUE（中报/年报全持仓）。
-- 业绩指标（收益率/年化/夏普/最大回撤/波动率/按业绩排名）一律查视图 v_fund_perf_latest，按 period 选区间（YTD/1Y/3Y/SI），**不要用 fact_nav 现算，也不要按日期过滤**。
+- 业绩指标（收益率/年化/夏普/最大回撤/波动率/按业绩排名）按【区间类型】分两条路，绝不混用：
+  · 【固定区间】今年以来=YTD / 近一年=1Y / 近三年=3Y / 成立以来=SI → 查视图 v_fund_perf_latest 按 period 选，不要按日期过滤、不要用 fact_nav 现算。
+  · 【自定义区间】具体年份（如"2023年以来"→ 起始日 '2023-01-01'）、具体起止日期、过去N个月/N年 → 这类【没有对应的固定 period】，【严禁】套用最接近的 YTD/1Y/3Y/SI（那是错的），必须调用函数 f_fund_perf_range(fund_code, 起始日, 结束日) 计算（口径与预计算一致；区间末未指定就用 CURRENT_DATE）；也【不要】自己用 fact_nav 手写夏普/年化公式。
+    用法（LATERAL，一次取全部指标）：
+      SELECT d.fund_name, m.sharpe FROM dim_fund d,
+        LATERAL f_fund_perf_range(d.fund_code, '2023-01-01', CURRENT_DATE) m
+      WHERE d.fund_name LIKE '%易方达%' ORDER BY m.sharpe;
 - 日期格式 'YYYY-MM-DD'。今天是 {today}。"今年"指 nav_date >= '{year}-01-01'。
 - 净值表没有非交易日的行（元旦、周末等），**切勿假设某个确切日期存在并用等值连接**。
   计算区间收益时：「年初/期初」取区间内最早交易日的净值，「最新/当前」取 MAX(nav_date) 的净值；
@@ -336,7 +347,9 @@ JSON 字段（schema）：
 - x: 列名（pie 表示扇区类别，scatter/line/bar 的横轴；x/y 取值必须是给定列名之一）
 - y: 列名，或列名【列表】（pie 表示数值；line/area/bar 若要同图对比多个数值列，
      y 用列表，如 ["top5_weight","top10_weight"]，每列会成为一条序列）
-- color: 列名 或 null（按该列分组着色，如按基金类型/行业分色；散点可按某指标着色）
+- color: 列名 或 null（按该列分组着色，如按基金类型/基金公司/行业分色；散点可按某指标着色）
+- color_map: {类别值: 颜色} 或 null（仅当用户【指定某类用某颜色】时给出，须配合 color 使用，把 color 列里的
+     类别值映射到颜色，如 color="基金公司" 时 color_map={"易方达":"蓝色","广发":"红色"}；颜色中英文皆可）
 - size: 列名 或 null（仅 scatter，气泡大小，须为非负数值列）
 - orientation: "v" 或 "h"（仅 bar；条目多/名称长时用 "h" 横向更易读）
 - stack: true/false（仅 area/bar，是否堆叠）
@@ -348,6 +361,12 @@ JSON 字段（schema）：
 - 时间序列(含日期列)→ line；行业/资产仓位随时间且看构成 → area(可 stack/normalize)
 - 两个数值指标的关系(如收益vs波动)→ scatter，可用 color/size 增加维度
 - 单期占比/构成 → pie；排名/对比 → bar(按值排序，条目多用 orientation:h)
+- 用户指定分组配色（如"X 用蓝色、Y 用红色"）→ color 设为对应的【分类列】并给出 color_map，
+  把颜色交给 color_map，绝不假设数据里自带颜色列。
+- 【模糊/未明确指令要推理补全，不要因信息不全而忽略】：
+  · 用户说"升序/降序/排序"但未指明字段 → 默认按图表的【主数值列 y】排序（如夏普图按 sharpe）。
+  · "最高/最低/前N/排名/最…" → 隐含按相应数值列降序(desc)。
+  · 实在无法判断时，选最能表达问题意图的合理默认，并仍给出 sort，而不是留空。
 - x/y/color/size 只能引用给定列名，绝不杜撰列名。"""
 
 
@@ -382,7 +401,22 @@ def _validate_spec(spec, df: pd.DataFrame) -> bool:
         v = spec.get(f)
         if v is not None and v not in cols:
             return False
+    cm = spec.get("color_map")
+    if cm is not None:
+        # a color->value map only makes sense keyed on a categorical color column
+        if not isinstance(cm, dict) or spec.get("color") not in cols:
+            return False
     return True
+
+
+def _discrete_color_map(color_map) -> dict | None:
+    """Normalize a spec color_map {类别: 颜色} into a Plotly color_discrete_map,
+    translating Chinese color words (蓝色→blue) via _COLOR_MAP. This is how a
+    user's per-category color instruction is honored at the PRESENTATION layer —
+    never in SQL (the SQL contract forbids baking colors into the data)."""
+    if not isinstance(color_map, dict) or not color_map:
+        return None
+    return {str(k): _COLOR_MAP.get(str(v), str(v)) for k, v in color_map.items()}
 
 
 def render_spec(df: pd.DataFrame, spec: dict, *, recolor: str | None = None) -> go.Figure:
@@ -391,6 +425,7 @@ def render_spec(df: pd.DataFrame, spec: dict, *, recolor: str | None = None) -> 
     x = spec["x"]
     ys = spec["y"] if isinstance(spec["y"], list) else [spec["y"]]
     color, size = spec.get("color"), spec.get("size")
+    cdm = _discrete_color_map(spec.get("color_map"))  # per-category colors (presentation)
     title = spec.get("title") or ""
     d = df
     srt = spec.get("sort")
@@ -405,26 +440,38 @@ def render_spec(df: pd.DataFrame, spec: dict, *, recolor: str | None = None) -> 
     else:
         y = ys[0]
 
+    # color_discrete_map only applies when coloring by a categorical column.
+    cdm = cdm if (color and not pd.api.types.is_numeric_dtype(d[color])) else None
+
     if t == "pie":
         fig = _pie(d, x, y, title)
     elif t == "scatter":
         if size and (not pd.api.types.is_numeric_dtype(d[size]) or (d[size] < 0).any()):
             size = None  # px.scatter size must be non-negative numeric
-        fig = px.scatter(d, x=x, y=y, color=color, size=size,
+        fig = px.scatter(d, x=x, y=y, color=color, size=size, color_discrete_map=cdm,
                          hover_name=_label_col(d, {x, y, color, size}), title=title)
     elif t == "line":
-        fig = px.line(d.sort_values(x), x=x, y=y, color=color, title=title)
+        fig = px.line(d.sort_values(x), x=x, y=y, color=color,
+                      color_discrete_map=cdm, title=title)
         if spec.get("normalize") == "percent" and color:
             fig.update_traces(groupnorm="percent")
     elif t == "area":
-        fig = px.area(d.sort_values(x), x=x, y=y, color=color, title=title)
+        fig = px.area(d.sort_values(x), x=x, y=y, color=color,
+                      color_discrete_map=cdm, title=title)
         if spec.get("normalize") == "percent":
             fig.update_traces(groupnorm="percent")
     elif t == "bar":
+        # when a sort was requested, pin the category axis to the sorted order so
+        # the bars READ as 升序/降序 even under color grouping (else px groups by
+        # color trace and the visual order no longer follows the sort).
+        cat_order = ({x: list(dict.fromkeys(d[x].tolist()))}
+                     if isinstance(srt, dict) and srt.get("by") in df.columns else None)
         if spec.get("orientation") == "h":
-            fig = px.bar(d, x=y, y=x, color=color, orientation="h", title=title)
+            fig = px.bar(d, x=y, y=x, color=color, orientation="h",
+                         color_discrete_map=cdm, category_orders=cat_order, title=title)
         else:
-            fig = px.bar(d, x=x, y=y, color=color, title=title)
+            fig = px.bar(d, x=x, y=y, color=color, color_discrete_map=cdm,
+                         category_orders=cat_order, title=title)
         if color or spec.get("stack"):
             fig.update_layout(barmode="stack" if spec.get("stack") else "group")
         if spec.get("normalize") == "percent":
