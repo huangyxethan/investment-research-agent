@@ -1,300 +1,325 @@
 # Investment Research Agent
 
 A Streamlit-based NL2SQL research assistant for Chinese public mutual-fund
-analysis. Users ask questions in Chinese; the system generates PostgreSQL SQL,
-executes it against a local fund database, and returns a short narrative,
-Plotly chart, generated SQL, and raw data table.
+analysis. Users ask questions in natural Chinese; the agent generates PostgreSQL
+SQL against a live schema, validates it through deterministic safety rails,
+executes it, and returns a short Chinese narrative, a Plotly chart, the generated
+SQL, and the raw result table.
 
-This repository is an internship/demo project with production-oriented
-engineering boundaries: ETL scripts, PostgreSQL schema, SQL safety rails,
-role-gated UI, and evaluation scripts are kept separate.
+This is an internship/demo project written with production-oriented engineering
+boundaries: ETL, schema, SQL safety, role-gated UI, and evaluation are kept as
+separate, independently runnable layers. For the full design rationale and
+roadmap, see [blueprint.md](blueprint.md).
 
-For the full design rationale and roadmap, see [blueprint.md](blueprint.md).
+## Table of Contents
+
+- [Current Scope](#current-scope)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Repository Layout](#repository-layout)
+- [Prerequisites](#prerequisites)
+- [Configuration](#configuration)
+- [Local Setup](#local-setup)
+- [Quick Start](#quick-start)
+- [Data Loading](#data-loading)
+- [Running the Application](#running-the-application)
+- [Evaluation](#evaluation)
+- [Deployment](#deployment)
+- [Security Model](#security-model)
+- [Known Limitations](#known-limitations)
+- [License](#license)
 
 ## Current Scope
 
-Implemented and usable today:
+**Implemented and usable today:**
 
 - Public-fund master data, NAV history, holdings, manager mappings, Shenwan
-  industry classification, and precomputed fund performance metrics.
-- Prompt-based Chinese NL2SQL over live PostgreSQL schema comments.
-- SQL AST safety guard using `sqlglot`.
-- Narrative generation from real query results.
-- Plotly chart generation via LLM-authored chart specs with deterministic
-  fallback rendering.
-- Streamlit frontend with `admin` / `viewer` role behavior.
-- NL2SQL and chart regression evaluation scripts.
+  (申万) industry classification, and precomputed fund-performance metrics.
+- Prompt-based Chinese NL2SQL grounded in live PostgreSQL schema/column comments.
+- Deterministic SQL AST safety guard built on `sqlglot`.
+- Chinese narrative generation from the actual query result.
+- Plotly chart generation from LLM-authored chart specs, with a deterministic
+  fallback renderer when a spec is missing or invalid.
+- Custom date-range fund metrics via a whitelisted semantic-layer function
+  (`f_fund_perf_range`).
+- Streamlit frontend with `admin` / `viewer` role-based output.
+- NL2SQL, chart, latency, and multi-dimension stress evaluation scripts.
 
-Designed but not yet populated/fully wired:
+**Designed but not yet populated / fully wired:**
 
-- Vanna + pgvector RAG retrieval.
+- Vanna + pgvector RAG retrieval of Q-SQL examples.
 - Brinson attribution, RBSA factor exposure, convertible bond, futures,
-  benchmark composition, fee, AUM/scale, and embedding data tables.
+  benchmark composition, fee, and AUM/scale data tables.
 - Dagster production asset orchestration.
-- Production-grade SSO, multi-tenant workspace isolation, and row-level access.
+- Production-grade SSO, multi-tenant isolation, and row-level access control.
 
 ## Architecture
 
 ```text
 AkShare / public web sources
-        |
-        v
-ETL scripts in etl/
-        |
-        v
-PostgreSQL 16 + pgvector (Docker container: invest_pg)
-        |
-        v
-agent.pipeline
-  - schema_context() reads table/column comments
-  - LLM generates SQL
-  - sql_guard validates SQL
-  - run_sql() returns a DataFrame
-  - narrate() creates Chinese analysis
-  - chart renderer creates Plotly figure
-        |
-        v
-Streamlit UI in web/app.py
+        │
+        ▼
+ETL scripts in etl/                         # extract → load → compute → quality-check
+        │
+        ▼
+PostgreSQL 16 + pgvector  (Docker: invest_pg)
+        │
+        ▼
+agent.pipeline.ask()                        # 5 timed stages
+   1. schema_context()   read table/column comments        [DB]
+   2. generate_sql()     LLM drafts a single SELECT         [LLM · bulk]
+   3. sql_guard.guard()  AST validation + LIMIT injection   [local]
+   4. run_sql()          execute, return a DataFrame        [DB]
+   5. narrate()          Chinese analysis of the result     [LLM]
+      author_chart_spec()→ render_spec() / build_chart()    [LLM · Claude → local]
+        │
+        ▼
+Streamlit UI in web/app.py                  # auth + role-gated rendering
 ```
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Database | PostgreSQL 16, pgvector |
+| Database | PostgreSQL 16 with pgvector |
 | Local runtime | Docker Compose |
-| ETL | Python, AkShare, pandas, psycopg |
-| Agent | Python, DeepSeek / Claude via API |
-| SQL validation | sqlglot |
-| Dataframe/charting | pandas, Plotly |
+| ETL | Python, AkShare, mootdx, pandas, psycopg |
+| Agent | Python; Claude (Anthropic) + DeepSeek behind a single `LLMClient` interface |
+| SQL safety | sqlglot AST validation |
+| Charting | pandas, Plotly |
 | Frontend | Streamlit, streamlit-authenticator |
-| Evaluation | YAML test cases, Python regression scripts |
+| Evaluation | YAML cases + Python regression / profiling scripts |
+
+LLM routing is tiered (see [Configuration](#configuration)): a `bulk` tier for
+high-volume NL2SQL, a `primary` tier, and a `showcase` tier for chart-spec
+authoring. All backends implement the same `complete()` surface in
+[agent/clients.py](agent/clients.py), so the pipeline never depends on a vendor.
 
 ## Repository Layout
 
 ```text
-agent/                 NL2SQL pipeline, LLM clients, SQL guard
-etl/                   Data extraction, loading, performance computation, quality checks
-eval/                  NL2SQL and chart regression tests
+agent/                 NL2SQL pipeline, LLM clients, SQL safety guard
+  ├─ pipeline.py       ask(): schema → SQL → guard → exec → narrate → chart
+  ├─ clients.py        LLMClient ABC + DeepSeek / Anthropic implementations
+  └─ sql_guard.py      sqlglot AST validation and row-cap injection
+etl/                   Extraction, loading, performance compute, quality checks
+eval/                  NL2SQL, chart, latency, and stress evaluation
 sql/schema.sql         PostgreSQL schema, comments, views, and functions
-web/app.py             Streamlit frontend with auth and role behavior
-training_data/qsql/    Curated Q-SQL examples; not dynamically retrieved yet
-chart_catalog/         Early chart-template registry
-scripts/               Utility scripts, e.g. password hash generation
+web/app.py             Streamlit frontend with auth and role-based output
+training_data/qsql/    Curated Q-SQL few-shot examples (semantic layer)
+chart_catalog/         Chart-template registry
+scripts/               Utility scripts (e.g. password-hash generation)
 docker-compose.yml     Local PostgreSQL + pgvector service
+.env.example           Environment-variable template
 DEPLOY.md              Streamlit Cloud + Neon deployment guide
+blueprint.md           Full design rationale and roadmap
 ```
 
 ## Prerequisites
 
-- Windows PowerShell or equivalent shell.
-- Python 3.10+ recommended.
-- Docker Desktop.
-- A PostgreSQL-compatible connection string via `PG_CONN_STR`.
+- Docker Desktop (for the local PostgreSQL + pgvector container).
+- Python 3.10 or newer.
+- A shell — examples below use Windows PowerShell; adapt paths for macOS/Linux.
 - At least one LLM API key:
-  - `DEEPSEEK_API_KEY` for default/bulk use.
-  - `ANTHROPIC_API_KEY` if using Claude.
+  - `DEEPSEEK_API_KEY` — default/bulk NL2SQL.
+  - `ANTHROPIC_API_KEY` — Claude (primary tier + chart-spec authoring).
 
 ## Configuration
 
-Create a local environment file:
+Create a local environment file from the template:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Then fill in:
+Then fill it in. The variables map directly to
+[.env.example](.env.example):
 
 ```dotenv
+# --- Postgres ---
+PG_PASSWORD=change_me_local_dev
+PG_DB=invest
+PG_USER=postgres
 PG_CONN_STR=postgresql://postgres:change_me_local_dev@localhost:5432/invest
-DEEPSEEK_API_KEY=...
-ANTHROPIC_API_KEY=...
-LLM_PROVIDER=deepseek
+
+# --- LLM keys ---
+ANTHROPIC_API_KEY=
+DEEPSEEK_API_KEY=
+
+# --- Model routing ---
+LLM_PRIMARY=claude-sonnet-4-6     # primary tier
+LLM_BULK=deepseek-chat            # high-volume NL2SQL
+LLM_SHOWCASE=claude-opus-4-7      # chart-spec authoring
 ```
 
-For the Streamlit app, create a local secrets file from the example:
+`PG_PASSWORD`, `PG_DB`, and `PG_USER` are consumed by Docker Compose when the
+container first boots; `PG_CONN_STR` is used by the ETL scripts and the agent.
+The optional `LLM_PROVIDER` variable (`deepseek` by default, or `claude`)
+selects which backend `agent.clients.default_client()` instantiates.
+
+For the Streamlit app, create a local secrets file from its example:
 
 ```powershell
 Copy-Item .streamlit\secrets.toml.example .streamlit\secrets.toml
 ```
 
-Generate password hashes with:
+Generate password hashes for the login accounts with:
 
 ```powershell
 .venv\Scripts\python.exe scripts\gen_password_hash.py <admin-password> <viewer-password>
 ```
 
-Never commit `.env` or `.streamlit/secrets.toml`.
+> **Never commit `.env` or `.streamlit/secrets.toml`.** Both are git-ignored.
 
 ## Local Setup
 
-Start PostgreSQL:
+**1. Start PostgreSQL.** On first boot, Docker mounts `sql/schema.sql` into
+`/docker-entrypoint-initdb.d/`, so the schema is created automatically:
 
 ```powershell
 docker compose up -d postgres
 ```
 
-On first boot, Docker mounts `sql/schema.sql` into
-`/docker-entrypoint-initdb.d/01_schema.sql`, so PostgreSQL creates the schema
-automatically.
-
-Create and activate a virtual environment:
+**2. Create and activate a virtual environment:**
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\activate
 ```
 
-Install app runtime dependencies:
+**3. Install dependencies.** The app runtime is kept slim (no torch/akshare) so
+Streamlit Cloud builds fast; heavier ETL/ML/dev deps are separate:
 
 ```powershell
-pip install -r requirements.txt
+pip install -r requirements.txt        # app runtime
+pip install -r requirements-etl.txt    # only when loading/refreshing data
 ```
 
-Install ETL/dev dependencies when loading or refreshing data:
-
-```powershell
-pip install -r requirements-etl.txt
-```
-
-Verify the database schema:
+**4. Verify the schema:**
 
 ```powershell
 docker exec invest_pg psql -U postgres -d invest -c "\dt"
 ```
 
-## Quick Start: Local Web App
+## Quick Start
 
-If your local database is already loaded, the shortest path to run the web UI is:
+If the database is already loaded, the shortest path to the web UI is:
 
 ```powershell
 docker compose up -d postgres
 .venv\Scripts\streamlit.exe run web/app.py
 ```
 
-Then open:
+Then open <http://localhost:8501>. The app requires `.streamlit/secrets.toml`
+with `PG_CONN_STR`, at least one LLM key, a `cookie_key`, and the `admin` /
+`viewer` password hashes.
 
-```text
-http://localhost:8501
-```
-
-The app requires `.streamlit/secrets.toml` for login credentials and LLM/database
-secrets. If you have not created it yet:
-
-```powershell
-Copy-Item .streamlit\secrets.toml.example .streamlit\secrets.toml
-```
-
-Fill in `PG_CONN_STR`, at least one LLM key, `cookie_key`, and the password
-hashes for the `admin` and `viewer` accounts.
-
-If this is a fresh database with no data yet, run the ETL steps in
-[Data Loading](#data-loading) before expecting useful answers.
+If this is a fresh database with no data, run the [Data Loading](#data-loading)
+steps first.
 
 ## Data Loading
 
-Run ETL scripts in this general order:
+Run the ETL pipeline in this order (module form, from the repo root):
 
 ```powershell
-.venv\Scripts\python.exe -m etl.build_universe
-.venv\Scripts\python.exe etl/load_funds.py
-.venv\Scripts\python.exe etl/load_managers.py
-.venv\Scripts\python.exe etl/load_holdings.py
-.venv\Scripts\python.exe etl/load_sw_industry.py
-.venv\Scripts\python.exe -m etl.compute_fund_perf
-.venv\Scripts\python.exe -m etl.data_quality
+.venv\Scripts\python.exe -m etl.build_universe       # fund universe → fund_universe.csv
+.venv\Scripts\python.exe etl/load_funds.py           # dim_fund + fact_nav
+.venv\Scripts\python.exe etl/load_managers.py        # manager mappings
+.venv\Scripts\python.exe etl/load_holdings.py        # fact_holding + dim_security stocks
+.venv\Scripts\python.exe etl/load_sw_industry.py     # dim_security.industry_l1 / _l2
+.venv\Scripts\python.exe -m etl.compute_fund_perf    # YTD/1Y/3Y/SI → fact_fund_perf
+.venv\Scripts\python.exe -m etl.data_quality         # post-load quality checks
 ```
 
-Notes:
+**Universe maintenance (optional).** The fund universe can be cleaned and grown
+without re-introducing share-class duplicates (e.g. the A/C/E/I shares of one
+fund):
 
-- `load_funds.py` loads `dim_fund` and `fact_nav`.
-- `load_holdings.py` loads `fact_holding` and stock rows in `dim_security`.
-- `load_sw_industry.py` enriches `dim_security.industry_l1` and
-  `dim_security.industry_l2`.
-- `compute_fund_perf.py` computes YTD / 1Y / 3Y / SI metrics from accumulated
-  NAV and writes `fact_fund_perf`.
+```powershell
+.venv\Scripts\python.exe -m etl.dedup_universe --dry-run   # analyze share-class dupes
+.venv\Scripts\python.exe -m etl.dedup_universe --apply     # prune DB + CSV
+.venv\Scripts\python.exe -m etl.expand_universe            # grow universe, delta codes
+```
 
-## Run the Local Web App
+## Running the Application
+
+### Web app
 
 ```powershell
 .venv\Scripts\streamlit.exe run web/app.py
 ```
 
-The app will require valid Streamlit auth credentials from
-`.streamlit/secrets.toml`. By default, Streamlit serves the app at:
+Served at <http://localhost:8501>. Output is role-gated:
 
-```text
-http://localhost:8501
-```
+- **`admin`** — narrative, chart, generated SQL, and the full data table.
+- **`viewer`** — narrative, chart, and a truncated table; SQL is hidden.
 
-Role behavior:
+### Command line
 
-- `admin`: narrative, chart, generated SQL, and full data table.
-- `viewer`: narrative, chart, and truncated data table; SQL hidden.
-
-## Run the Agent from CLI
+Run the full pipeline against a single question and print each stage:
 
 ```powershell
 .venv\Scripts\python.exe -m agent.pipeline "易方达蓝筹精选今年的单位净值走势"
 ```
 
-This prints the generated SQL, row count, result sample, narrative, and chart
-build status.
+This prints the generated SQL, row count, a result sample, the narrative, and
+the chart build status.
 
 ## Evaluation
 
-Run the NL2SQL evaluation set:
-
 ```powershell
-.venv\Scripts\python.exe -m eval.run_eval
+.venv\Scripts\python.exe -m eval.run_eval    # NL2SQL regression over eval/cases.yaml
+.venv\Scripts\python.exe -m eval.charts      # deterministic chart regression
+.venv\Scripts\python.exe -m eval.perf        # per-stage latency profile (--repeat N)
+.venv\Scripts\python.exe -m eval.stress      # multi-dimension stress over hard joins
+.venv\Scripts\python.exe -m etl.data_quality # data-quality checks
 ```
 
-Run deterministic chart regression checks:
-
-```powershell
-.venv\Scripts\python.exe -m eval.charts
-```
-
-Run data-quality checks:
-
-```powershell
-.venv\Scripts\python.exe -m etl.data_quality
-```
+- **`run_eval`** — NL2SQL correctness against curated cases.
+- **`perf`** — runs the full `ask()` pipeline and breaks latency down into
+  LLM / DB / local stages, answering "where does the time go".
+- **`stress`** — drives hard, multi-table-join questions tagged by 口径
+  dimension, classifies each outcome (OK / EMPTY / EXEC_FAIL / GEN_FAIL /
+  VALUE_FAIL), and reports per dimension to surface the weakest capability.
 
 ## Deployment
 
-The recommended low-cost demo path is:
+The recommended low-cost demo path:
 
-- Streamlit Community Cloud for `web/app.py`.
-- Neon PostgreSQL for the hosted database.
-- Streamlit Secrets for database URL, LLM keys, cookie key, and password hashes.
+- **Streamlit Community Cloud** hosts `web/app.py`.
+- **Neon PostgreSQL** hosts the database.
+- **Streamlit Secrets** hold the database URL, LLM keys, cookie key, and
+  password hashes.
 
-See [DEPLOY.md](DEPLOY.md) for the full deployment procedure.
+See [DEPLOY.md](DEPLOY.md) for the full procedure.
 
-## Security Notes
+## Security Model
 
-- The LLM-generated SQL is validated before execution.
-- Only a single `SELECT` statement is allowed.
-- Allowed table prefixes are `dim_`, `fact_`, `bridge_`, and `v_`.
-- Allowed table-valued functions are explicitly whitelisted.
-- A `LIMIT 10000` row cap is injected if missing.
-- Secrets are loaded from `.env` locally or Streamlit Secrets in deployment.
+SQL produced by the LLM is validated before execution by
+[agent/sql_guard.py](agent/sql_guard.py):
 
-Security guardrails reduce execution risk, but they do not prove business
-correctness. Business correctness is handled through schema design, semantic
-views/functions, evaluation cases, and manual review.
+- Exactly one statement, and it must be a read-only `SELECT` (no `SELECT … INTO`).
+- Every referenced table must use an allowed prefix: `dim_`, `fact_`, `bridge_`,
+  or `v_` (semantic-layer views); non-`public` schemas are rejected.
+- Only explicitly whitelisted set-returning functions (currently
+  `f_fund_perf_range`) may appear in a table position, including via `LATERAL`.
+- A `LIMIT 10000` cap is injected if the query has none.
+- Secrets come from `.env` locally or Streamlit Secrets in deployment.
+
+These guardrails reduce execution risk but do not prove business correctness;
+that is handled by schema design, semantic views/functions, evaluation cases,
+and manual review.
 
 ## Known Limitations
 
-- Data is based on public disclosure and historical NAV, not intraday data.
-- Quarterly fund holdings are usually top-10 only; full-holding analysis uses
-  semiannual/annual reports marked by `is_full_holding`.
-- Industry classification is not 100% covered for HK stocks, BSE stocks,
-  delisted names, and some historical holdings.
-- Current NL2SQL does not dynamically retrieve Q-SQL examples from pgvector.
-- Some schema tables are intentionally present as future extension points but
-  currently empty.
+- Data reflects public disclosure and historical NAV, not intraday quotes.
+- Quarterly holdings are typically top-10 only; full-holding analysis relies on
+  semiannual/annual reports flagged by `is_full_holding`.
+- Industry classification is not fully covered for HK/BSE stocks, delisted
+  names, and some historical holdings.
+- NL2SQL does not yet dynamically retrieve Q-SQL examples from pgvector.
+- Some schema tables exist as future extension points and are currently empty.
 
 ## License
 
-No license has been specified in this repository.
+No license has been specified for this repository.
