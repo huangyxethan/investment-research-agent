@@ -7,6 +7,7 @@ regenerating the CSV — no code edits needed.
 from __future__ import annotations
 
 import csv
+import os
 import pathlib
 
 # Curated, style-diverse, famous-manager funds — guaranteed in the universe so
@@ -41,4 +42,12 @@ def _load_universe() -> dict[str, str]:
 
 
 UNIVERSE = _load_universe()
+
+# Delta hook: when UNIVERSE_ONLY is set (comma-separated codes), ETL scripts that
+# iterate CODES (load_funds / load_holdings) restrict to just those — lets us pull
+# ONLY newly added funds instead of re-pulling the whole universe.
+_ONLY = {c.strip() for c in os.environ.get("UNIVERSE_ONLY", "").split(",") if c.strip()}
+if _ONLY:
+    UNIVERSE = {c: n for c, n in UNIVERSE.items() if c in _ONLY}
+
 CODES = list(UNIVERSE)

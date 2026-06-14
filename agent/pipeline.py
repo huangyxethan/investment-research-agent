@@ -12,7 +12,8 @@ import decimal
 import json
 import os
 import re
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 
 import pandas as pd
 import plotly.express as px
@@ -36,6 +37,7 @@ CONTEXT_TABLES = (
     "v_fund_top_holdings",
     "v_fund_industry_alloc",
     "v_fund_industry_l2_alloc",
+    "v_fund_industry_any",
     "fact_holding",
     "dim_security",
 )
@@ -547,20 +549,34 @@ class AskResult:
     narrative: str
     figure: go.Figure
     spec: dict | None = None   # Tier-3 chart spec (None when Tier-2 fallback used)
+    timings: dict[str, float] = field(default_factory=dict)  # per-stage seconds (B2)
 
 
 def ask(question: str, llm: LLMClient | None = None) -> AskResult:
     llm = llm or default_client()
-    schema = schema_context()
-    sql = generate_sql(question, llm, schema)
-    df = run_sql(sql)
-    narrative = narrate(question, df, llm)
-    spec = author_chart_spec(question, df)          # Tier-3 (Claude); None on failure
-    try:
-        figure = render_spec(df, spec) if spec else build_chart(df, question)
-    except Exception:
-        figure, spec = build_chart(df, question), None   # graceful fallback
-    return AskResult(question, sql, df, narrative, figure, spec)
+    t: dict[str, float] = {}
+
+    def _t(name: str, fn):
+        s = time.perf_counter()
+        r = fn()
+        t[name] = time.perf_counter() - s
+        return r
+
+    schema = _t("schema", lambda: schema_context())            # DB metadata read
+    sql = _t("sql_gen", lambda: generate_sql(question, llm, schema))   # LLM
+    df = _t("db_exec", lambda: run_sql(sql))                    # DB execution
+    narrative = _t("narrate", lambda: narrate(question, df, llm))      # LLM
+    spec = _t("chart_spec", lambda: author_chart_spec(question, df))   # LLM (Claude)
+
+    def _render():
+        try:
+            return (render_spec(df, spec) if spec else build_chart(df, question)), spec
+        except Exception:
+            return build_chart(df, question), None              # graceful fallback
+    figure, spec = _t("chart_render", _render)                  # local render
+
+    t["total"] = sum(v for k, v in t.items() if k != "total")
+    return AskResult(question, sql, df, narrative, figure, spec, t)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,46 @@
+# Multi-dimensional STRESS battery (leader feedback C-3/C-4: probe stability of
+# complex, multi-table-join queries across 口径 dimensions). This is the
+# CANDIDATE tier — execution/shape-classified, NOT a value oracle. The gold
+# value-checked set stays in cases.yaml; here we measure whether the agent can
+# STABLY turn a hard cross-table question into executable, non-empty SQL, and we
+# tag by dimension so we see WHICH 口径 is weak.
+#
+# fields:
+#   dim        -> 口径 bucket: metric|company|perf|industry|cross
+#   min_tables -> base tables/views the correct SQL should touch (stress.py
+#                 counts the agent's actual join depth against this)
+#   question   -> the NL question
+#   expect     -> (optional) substrings that must appear; only on cases whose
+#                 answer was pre-verified against the live 195-fund DB
+
+# ============ 指标口径 (metric: return / sharpe / drawdown / vol; fixed + custom range) ============
+- {id: m_yfd_sharpe_top,  dim: metric,  min_tables: 2, question: "易方达旗下所有基金里，成立以来夏普比率最高的三只是哪些"}
+- {id: m_pos_ret_lowvol,  dim: metric,  min_tables: 1, question: "今年以来收益率为正、并且波动率最低的五只基金"}
+- {id: m_custom_annual,   dim: metric,  min_tables: 1, question: "2023年以来年化收益率排名前五的基金分别是哪些"}
+- {id: m_dd_of_topret,    dim: metric,  min_tables: 1, question: "近一年收益率排名前十的基金，它们各自的最大回撤是多少"}
+- {id: m_vol_below_med,   dim: metric,  min_tables: 1, question: "成立以来波动率低于全市场中位数、且夏普大于1的基金有哪些"}
+
+# ============ 公司口径 (company: 易方达 vs 其他, group-by 公司) ============
+- {id: c_yfd_vs_other,    dim: company, min_tables: 1, question: "易方达的基金和非易方达的基金，今年以来平均收益率谁更高"}
+- {id: c_count_avgage,    dim: company, min_tables: 1, question: "易方达旗下股票型和混合型基金各有多少只"}
+- {id: c_yfd_best_mgr,    dim: company, min_tables: 3, question: "易方达旗下今年以来收益最高的基金是由哪位基金经理管理的"}
+- {id: c_company_rank,    dim: company, min_tables: 1, question: "按基金名称里的公司，统计各公司今年以来的平均收益率并排名"}
+
+# ============ 业绩口径 (performance: ranking, top/bottom, compare) ============
+- {id: p_best_worst_ytd,  dim: perf,    min_tables: 1, question: "今年以来涨得最多和跌得最多的基金分别是哪只"}
+- {id: p_zhangkun_gelan,  dim: perf,    min_tables: 3, question: "对比张坤和葛兰各自管理的基金，今年以来的平均收益率"}
+- {id: p_highret_lowdd,   dim: perf,    min_tables: 1, question: "成立以来年化收益率超过10%的基金里，最大回撤最小的是哪只"}
+- {id: p_mgr_avg_rank,    dim: perf,    min_tables: 3, question: "管理基金数量最多的前五位基金经理，他们名下基金今年以来的平均收益率"}
+
+# ============ 市场/行业口径 (申万 L1/L2, 大行业 vs 细分) ============
+- {id: i_l2_semi_top3,    dim: industry, min_tables: 2, question: "重仓半导体行业最多的前三只基金"}
+- {id: i_two_industry,    dim: industry, min_tables: 2, question: "同时重仓医药生物和食品饮料两个行业的基金有哪些"}
+- {id: i_alloc_one,       dim: industry, min_tables: 2, question: "易方达蓝筹精选最新一期在食品饮料行业的持仓占比是多少"}
+- {id: i_l2_baijiu_mgr,   dim: industry, min_tables: 3, question: "白酒板块仓位最高的基金，它的基金经理是谁"}
+- {id: i_bank_funds,      dim: industry, min_tables: 2, question: "最新一期重仓银行行业占比超过20%的基金有哪些"}
+
+# ============ 跨表深连接 / 经理 (deepest joins: fund × manager × holding × industry × perf) ============
+- {id: x_zk_sharpe_hold,  dim: cross,   min_tables: 4, question: "张坤管理的基金中，今年以来夏普最高的那只，前五大重仓股是什么"}
+- {id: x_baijiu_dd_mgr,   dim: cross,   min_tables: 4, question: "重仓白酒的基金里，成立以来最大回撤最小的是哪只，由谁管理"}
+- {id: x_yfd_med_mgr,     dim: cross,   min_tables: 4, question: "易方达旗下、最新一期医药生物行业占比最高的基金，由谁管理、今年以来收益多少"}
+- {id: x_mgr_topind,      dim: cross,   min_tables: 4, question: "葛兰管理的基金最新一期重仓的第一大申万行业是哪个"}

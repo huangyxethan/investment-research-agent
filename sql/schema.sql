@@ -294,6 +294,10 @@ COMMENT ON COLUMN v_fund_holding_latest.weight      IS '该个股占基金净值
 COMMENT ON COLUMN v_fund_holding_latest.industry_l1 IS '所属申万一级行业；用 LIKE ''%关键词%'' 容忍简称（医药->医药生物）；NULL=港股/北交所/退市标的';
 COMMENT ON COLUMN v_fund_holding_latest.industry_l2 IS '所属申万二级行业（共131个，如 白酒Ⅱ、半导体、医疗器械、乘用车 等）；用 LIKE ''%关键词%'' 容忍简称及罗马数字后缀（"白酒"匹配"白酒Ⅱ"）；NULL=港股/北交所/退市标的';
 
+-- v_fund_industry_any (defined below) is a UNION of the two views dropped next, so
+-- on a re-run into a populated DB the dependent must be dropped first.
+DROP VIEW IF EXISTS v_fund_industry_any;
+
 -- v_fund_industry_alloc: the single INDUSTRY-level surface. Per (fund, report_date,
 -- industry) summed weight across full holdings, with an is_latest flag so the SAME
 -- view serves both the time series (no filter) and the latest cross-section / ranking
@@ -335,6 +339,26 @@ FROM (
 COMMENT ON VIEW   v_fund_industry_l2_alloc IS '基金各报告期（半年报/年报全持仓）的申万【二级】行业配置，每(基金,报告期,二级行业)一行（含父级 industry_l1、is_latest 标志）。【二级行业】的配置/占比/排名/时序一律用本视图；【一级行业】用 v_fund_industry_alloc。最新截面/排名加 WHERE is_latest；时序不加；时间轴 report_date（无 period 列，近N年用 report_date 过滤）。industry_l2 用 LIKE 容忍简称及罗马数字后缀（"白酒"匹配"白酒Ⅱ"）。已排除未归类标的（港股/北交所）。';
 COMMENT ON COLUMN v_fund_industry_l2_alloc.is_latest      IS '是否为该基金最新一期；最新/排名加 WHERE is_latest，时序不加';
 COMMENT ON COLUMN v_fund_industry_l2_alloc.industry_weight IS '该报告期该申万二级行业占净值比例之和（小数，0.38=38%）';
+
+-- v_fund_industry_any: UNIFIED named-industry lookup surface. UNION of the L1 and L2
+-- allocation views with an industry_level tag and ONE industry_name column, so a
+-- question that NAMES a specific industry (一级 OR 二级) is a single
+-- `WHERE industry_name LIKE '%X%'` — the agent no longer has to decide L1 vs L2 (the
+-- routing miss that sent 半导体/白酒 to industry_l1 and returned 0 rows). Reuses the
+-- sibling views, so their 口径 (full holdings / is_latest / report_date) carry through.
+CREATE VIEW v_fund_industry_any AS
+SELECT fund_code, fund_name, report_date, '一级' AS industry_level,
+       industry_l1 AS industry_name, industry_l1, industry_weight, is_latest
+FROM v_fund_industry_alloc
+UNION ALL
+SELECT fund_code, fund_name, report_date, '二级' AS industry_level,
+       industry_l2 AS industry_name, industry_l1, industry_weight, is_latest
+FROM v_fund_industry_l2_alloc;
+COMMENT ON VIEW   v_fund_industry_any IS '【按行业名查基金的统一入口】申万一级+二级行业配置的合集，每(基金,报告期,行业)一行；industry_level 标 ''一级''/''二级''，industry_name 是统一行业名列。当问题【点名某个具体行业】（不论一级或二级：银行/医药生物/半导体/白酒/光伏…）问"哪些基金重仓它/谁占比最高/某基金在它上的占比"时，一律用本视图 WHERE industry_name LIKE ''%关键词%''，【无需判断它是一级还是二级】（半导体/白酒等二级名在 industry_l1 上查不到，这里能查到）。最新截面/排名加 WHERE is_latest；时序不加；时间轴 report_date（无 period 列）。⚠按某个 industry_name 过滤天然只命中一个层级、安全；勿跨层级 SUM（会一二级重复计）。若要列【某基金所有行业的完整占比分布】请改用单层视图 v_fund_industry_alloc(一级)/v_fund_industry_l2_alloc(二级)。';
+COMMENT ON COLUMN v_fund_industry_any.industry_name  IS '统一行业名（一级或二级）；用 LIKE ''%关键词%'' 容忍简称与罗马数字后缀（医药->医药生物、白酒->白酒Ⅱ）';
+COMMENT ON COLUMN v_fund_industry_any.industry_level IS '该行业名的申万层级：一级 或 二级';
+COMMENT ON COLUMN v_fund_industry_any.industry_weight IS '该报告期该行业占净值比例之和（小数，0.38=38%）';
+COMMENT ON COLUMN v_fund_industry_any.is_latest      IS '是否为该基金最新一期全持仓；最新/排名加 WHERE is_latest，时序不加';
 
 -- v_fund_top_holdings: per-stock holdings with a per-period RANK by weight, so
 -- "前N大持仓/重仓股" is a trivial WHERE holding_rank<=N instead of a window

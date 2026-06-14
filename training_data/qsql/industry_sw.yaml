@@ -61,3 +61,29 @@
     ORDER BY industry_weight DESC
     LIMIT 10;
   note: 申万二级配置/排名/时序 → v_fund_industry_l2_alloc（一级用 v_fund_industry_alloc）；LIKE 容忍"白酒Ⅱ"后缀。
+
+# --- 统一入口 v_fund_industry_any：点名某个具体行业(不分一二级)查基金时首选，免去"该行业是一
+# 级还是二级"的路由判断（半导体/白酒等二级名在 industry_l1 上 0 行的根因）。已执行核验：
+# 半导体最重仓=申万菱信智能驱动(50.7%)；白酒经 bridge_fund_manager 可取到现任经理。
+
+- id: sw_any_named_industry
+  question: 重仓半导体行业最多的前三只基金
+  sql: |
+    SELECT fund_name, ROUND(industry_weight::numeric, 4) AS industry_weight
+    FROM v_fund_industry_any
+    WHERE industry_name LIKE '%半导体%' AND is_latest
+    ORDER BY industry_weight DESC
+    LIMIT 3;
+  note: 点名行业(一级或二级)→ v_fund_industry_any，industry_name LIKE 关键词，无需判断层级；半导体是二级，在此能查到、在 industry_l1 查不到。
+
+- id: sw_any_industry_manager
+  question: 白酒板块仓位最高的基金，它的基金经理是谁
+  sql: |
+    SELECT v.fund_name, m.manager_name, ROUND(v.industry_weight::numeric, 4) AS industry_weight
+    FROM v_fund_industry_any v
+    JOIN bridge_fund_manager bfm ON v.fund_code = bfm.fund_code AND bfm.is_current
+    JOIN dim_manager m ON bfm.manager_id = m.manager_id
+    WHERE v.industry_name LIKE '%白酒%' AND v.is_latest
+    ORDER BY v.industry_weight DESC
+    LIMIT 1;
+  note: 行业(统一入口)×经理跨表；白酒是二级，v_fund_industry_any 命中后再 join bridge_fund_manager + dim_manager 取现任经理。

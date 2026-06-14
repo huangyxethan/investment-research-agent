@@ -49,7 +49,8 @@ def main() -> int:
     with psycopg.connect(conn_str) as conn, conn.cursor() as cur:
         for code in CODES:
             fund_rows = 0
-            for year in YEARS:
+            try:
+              for year in YEARS:
                 try:
                     df = ak.fund_portfolio_hold_em(symbol=code, date=year)
                 except Exception:
@@ -94,8 +95,11 @@ def main() -> int:
                     )
                     fund_rows += 1
                     hold_total += 1
-            conn.commit()
-            print(f"  ✓ {code} {UNIVERSE[code]}: {fund_rows} holding rows")
+              conn.commit()
+              print(f"  ✓ {code} {UNIVERSE[code]}: {fund_rows} holding rows")
+            except Exception as e:
+              conn.rollback()
+              print(f"  ✗ {code} {UNIVERSE.get(code,'')}: {type(e).__name__}: {e}")
     print(f"\n[done] {hold_total} holding rows, {sec_total} dim_security upserts")
     return 0
 

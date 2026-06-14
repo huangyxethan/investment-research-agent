@@ -35,3 +35,16 @@ models/
 Thumbs.db
 .idea/
 .vscode/
+
+# Node deps
+node_modules/
+
+# Logs
+*.log
+
+# ETL intermediate scratch files
+etl/_*.txt
+
+# Presentation / docs deliverables (kept local, not in repo)
+ppt/
+docs/
