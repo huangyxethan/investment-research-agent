@@ -8,8 +8,7 @@ SQL, and the raw result table.
 
 This is an internship/demo project written with production-oriented engineering
 boundaries: ETL, schema, SQL safety, role-gated UI, and evaluation are kept as
-separate, independently runnable layers. For the full design rationale and
-roadmap, see [blueprint.md](blueprint.md).
+separate, independently runnable layers.
 
 ## Table of Contents
 
@@ -111,8 +110,6 @@ chart_catalog/         Chart-template registry
 scripts/               Utility scripts (e.g. password-hash generation)
 docker-compose.yml     Local PostgreSQL + pgvector service
 .env.example           Environment-variable template
-DEPLOY.md              Streamlit Cloud + Neon deployment guide
-blueprint.md           Full design rationale and roadmap
 ```
 
 ## Prerequisites
@@ -284,14 +281,84 @@ the chart build status.
 
 ## Deployment
 
-The recommended low-cost demo path:
+The recommended low-cost demo path uses **Streamlit Community Cloud** (hosts
+`web/app.py`) + **Neon** (hosted PostgreSQL with pgvector) +
+**streamlit-authenticator** (login + the two roles). All data is public, so
+there is no proprietary-data exposure.
 
-- **Streamlit Community Cloud** hosts `web/app.py`.
-- **Neon PostgreSQL** hosts the database.
-- **Streamlit Secrets** hold the database URL, LLM keys, cookie key, and
-  password hashes.
+**1. Create the Neon database.** Sign up at <https://neon.tech>, create a new
+project (pick a nearby region), and copy the connection string:
 
-See [DEPLOY.md](DEPLOY.md) for the full procedure.
+```text
+postgresql://USER:PASSWORD@ep-xxx.<region>.aws.neon.tech/neondb?sslmode=require
+```
+
+Neon supports pgvector by default — nothing extra to enable.
+
+**2. Push local data into Neon.** With the local `invest_pg` container running,
+dump and restore entirely inside the container to avoid host-side `psql`/encoding
+issues (replace `<NEON_URL>`):
+
+```powershell
+docker exec invest_pg sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-privileges | psql "<NEON_URL>"'
+docker exec invest_pg psql "<NEON_URL>" -c "SELECT count(*) FROM dim_fund;"   # spot check
+```
+
+Re-run this step whenever you refresh local data and want it reflected online.
+
+**3. Generate password hashes** for the login accounts:
+
+```powershell
+.venv\Scripts\python.exe scripts\gen_password_hash.py <admin-password> <viewer-password>
+```
+
+Copy the two `$2b$...` hashes (never commit plaintext passwords).
+
+**4. Deploy on Streamlit Community Cloud.**
+
+1. Sign in at <https://share.streamlit.io> with your GitHub account and authorize
+   the repository.
+2. **New app** → select the repo, branch `main`, and set
+   **Main file path = `web/app.py`**.
+3. Under **Advanced settings → Secrets**, paste the values following
+   `.streamlit/secrets.toml.example` (Neon connection string, LLM key(s), the
+   hashes from step 3, and a random `cookie_key`):
+
+   ```toml
+   PG_CONN_STR = "postgresql://...neon...?sslmode=require"
+   DEEPSEEK_API_KEY = "sk-..."
+   ANTHROPIC_API_KEY = "sk-ant-..."   # optional
+   cookie_key = "a-long-random-string"
+
+   [auth.credentials.usernames.admin]
+   name = "管理员"
+   email = "admin@example.com"
+   password = "$2b$12$...admin-hash..."
+   role = "admin"
+
+   [auth.credentials.usernames.viewer]
+   name = "访客"
+   email = "viewer@example.com"
+   password = "$2b$12$...viewer-hash..."
+   role = "viewer"
+   ```
+
+4. **Deploy.** Streamlit Cloud installs the slim root `requirements.txt`
+   (app runtime only, no torch/dagster) for a fast build. After a few minutes you
+   get a public URL; verify the role difference by logging in as each account.
+
+**Operational notes:**
+
+- **Secrets** live only in Cloud Secrets, never in git (`.env` and
+  `.streamlit/secrets.toml` are git-ignored).
+- **Dependencies** — Cloud uses `requirements.txt`; local data/ETL work uses
+  `requirements-etl.txt` (akshare/dagster/torch, etc.).
+- **Free tier** sleeps when idle (a few seconds of cold start on next visit),
+  which is fine for occasional review; move to a paid Render/Railway tier for
+  frequent use.
+- **Future** — swapping the frontend for FastAPI + React reuses Neon, accounts,
+  secrets, and platform; only the UI layer changes, since `agent/` stays
+  UI-agnostic.
 
 ## Security Model
 
