@@ -1,12 +1,12 @@
 """
-Data-quality checks (blueprint §10.2). Run as a battery against the loaded
+Data-quality checks. Run as a battery against the loaded
 warehouse; print a scorecard. FAIL = integrity problem (must fix), WARN =
 plausible outlier to eyeball, INFO = coverage stat. Exits non-zero on any FAIL.
 
 This is the logic that will later become Dagster AssetChecks (one extractor =
 one asset = its checks). For now it runs standalone, like the rest of the ETL.
 
-Run:  .venv/Scripts/python.exe -m etl.data_quality
+Run:  python -m etl.data_quality
 """
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
-# Chart catalog registry — fed to the Tier-1/2 intent classifier (blueprint §7.3).
-# One entry per template in chart_catalog/. Hero templates are filled in W6-W7.
-# Stub for now: only the generic time-series used by the W2 walking skeleton.
+# Chart catalog registry — fed to the Tier-1/2 intent classifier.
+# One entry per template in chart_catalog/. Currently a stub: only the generic
+# time-series template used by the deterministic renderer.
 
 time_series:
   description: "Generic time series line chart"

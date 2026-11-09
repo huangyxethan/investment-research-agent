@@ -1,11 +1,11 @@
 """
-Streamlit frontend (blueprint §9.1) — now deployable & access-controlled.
+Streamlit frontend — deployable and access-controlled.
 
 Thin wrapper over agent.pipeline.ask. Login + role-based access via
 streamlit-authenticator; secrets (DB url, LLM keys, accounts) come from
 st.secrets so the same code runs locally and on Streamlit Community Cloud.
 
-Roles (demo; refine later):
+Roles:
   admin  — narrative + chart + generated SQL + full data table
   viewer — narrative + chart + truncated data; SQL hidden
 
@@ -13,7 +13,7 @@ The agent core (agent.pipeline.ask) stays UI-agnostic: when we later move to a
 FastAPI + React canvas, authorization moves to the API boundary and this file is
 replaced wholesale — the reusable assets (hosted DB, secrets, accounts) carry over.
 
-Run locally:  .venv/Scripts/streamlit.exe run web/app.py
+Run locally:  streamlit run web/app.py
 """
 from __future__ import annotations
 

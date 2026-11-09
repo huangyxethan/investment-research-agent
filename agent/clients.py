@@ -1,9 +1,9 @@
 """
-LLM client interface + implementations (blueprint §11: LLMClient ABC seam).
+LLM client interface + implementations (the LLMClient ABC is the vendor seam).
 
-V1 uses DeepSeek for dev/bulk. The ABC is the swap point for Anthropic
-(primary/showcase, D7) and, later, a Vanna-backed RAG client — all behind the
-same `complete()` surface so the pipeline never changes.
+DeepSeek serves the bulk tier; Anthropic serves the primary and showcase tiers.
+A Vanna-backed RAG client can be added later — all behind the same `complete()`
+surface so the pipeline never changes.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ class LLMClient(ABC):
 
 
 class DeepSeekClient(LLMClient):
-    """OpenAI-compatible DeepSeek (D7 'bulk' tier)."""
+    """OpenAI-compatible DeepSeek ('bulk' tier)."""
 
     def __init__(self, model: str | None = None):
         key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
@@ -53,7 +53,7 @@ class DeepSeekClient(LLMClient):
 
 
 class AnthropicClient(LLMClient):
-    """Claude via the Anthropic Messages API (D7 primary/showcase tier).
+    """Claude via the Anthropic Messages API (primary/showcase tier).
 
     Same `complete()` surface as DeepSeek — the Anthropic-specific shape
     (system as a top-level arg, content blocks in the response) is absorbed here

@@ -1,10 +1,10 @@
 """
-W2 — DeepSeek connectivity smoke test.
+DeepSeek connectivity smoke test.
 
 Validates DEEPSEEK_API_KEY + the OpenAI-compatible base_url independently,
 before adding Vanna's complexity on top.
 
-Run:  .venv/Scripts/python.exe etl/smoke_test_deepseek.py
+Run:  python etl/smoke_test_deepseek.py
 """
 from __future__ import annotations
 

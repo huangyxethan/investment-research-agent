@@ -1,9 +1,9 @@
 """
-W3 data-discovery probe. akshare endpoint/column names drift and have units
+Data-discovery probe. akshare endpoint/column names drift and have units
 surprises (the NAV smoke test taught us), so before writing the ETL we surface
 what's actually available for: holdings, fund basic info, manager, acc-NAV.
 
-Run:  .venv/Scripts/python.exe etl/explore_akshare.py
+Run:  python etl/explore_akshare.py
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def probe(label: str, fn):
 
 
 # 1. Holdings — quarterly vs semi-annual. Does akshare return >10 rows for
-#    半年报/年报 (full holdings, which our Brinson口径 needs)?
+#    半年报/年报 (full holdings, which our Brinson convention needs)?
 probe("holdings 2025 — fund_portfolio_hold_em(date=2025)",
       lambda: ak.fund_portfolio_hold_em(symbol=CODE, date="2025"))
 probe("holdings 2024 — fund_portfolio_hold_em(date=2024)",
@@ -40,7 +40,7 @@ if hasattr(ak, "fund_individual_basic_info_xq"):
     probe("basic info — fund_individual_basic_info_xq",
           lambda: ak.fund_individual_basic_info_xq(symbol=CODE))
 
-# 3. Accumulated NAV (we only loaded unit NAV in W2)
+# 3. Accumulated NAV (the skeleton only loaded unit NAV)
 probe("acc-nav — fund_open_fund_info_em(indicator=累计净值走势)",
       lambda: ak.fund_open_fund_info_em(symbol=CODE, indicator="累计净值走势"))
 

@@ -1,5 +1,5 @@
 """
-Fund universe = curated HERO funds (famous managers, for hero-chart demos)
+Fund universe = curated HERO funds (well-known managers, used as anchor examples)
 UNION an auto-pulled broader set persisted in fund_universe.csv (built by
 etl/build_universe.py). All ETL reads CODES, so the universe scales by
 regenerating the CSV — no code edits needed.
@@ -11,7 +11,7 @@ import os
 import pathlib
 
 # Curated, style-diverse, famous-manager funds — guaranteed in the universe so
-# the demos always have good subjects.
+# example questions always have good subjects.
 HERO = {
     "005827": "易方达蓝筹精选 (张坤·消费/价值)",
     "110011": "易方达优质精选 (张坤)",

@@ -1,9 +1,9 @@
 """
-W1 akshare smoke test (blueprint §13).
+akshare smoke test.
 
 Goal: prove the open-source data path works and SURFACE THE REAL COLUMN
 NAMES akshare returns (they are Chinese and drift between versions — the ETL
-in W3 must map them, so we discover them now, not in week 3).
+must map them, so we discover them now rather than later).
 
 Run:  python etl/smoke_test_akshare.py
 """

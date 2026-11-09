@@ -1,9 +1,9 @@
 """
-W2 walking-skeleton pipeline: question -> SQL -> data -> narrative + chart.
+Core pipeline: question -> SQL -> data -> narrative + chart.
 
-Deliberately thin and Vanna-free (only one fact table exists yet). The schema
-context is pulled live from Postgres comments, so this generalises as tables
-fill in. Vanna slots in behind `clients.LLMClient` / a retriever later (§11).
+Deliberately thin and retriever-free. The schema context is pulled live from
+Postgres comments, so the pipeline generalises as tables fill in; a Vanna-style
+retriever can slot in behind `clients.LLMClient` later.
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from .sql_guard import guard
 
 load_dotenv()
 
-# Tables exposed to the skeleton. Expand as ETL fills more (or hand to Vanna).
+# Tables exposed to the schema context. Expand as ETL fills more (or hand to a retriever).
 CONTEXT_TABLES = (
     "dim_fund",
     "dim_manager",
@@ -41,7 +41,9 @@ CONTEXT_TABLES = (
     "fact_holding",
     "dim_security",
 )
-TODAY = dt.date(2026, 6, 1)  # blueprint demo "current date"
+# Reference date for relative expressions such as "今年以来" (year to date). Pinned to the
+# data snapshot date so evaluation cases stay reproducible; move it when data is refreshed.
+TODAY = dt.date(2026, 6, 1)
 
 
 # --------------------------------------------------------------------------- #
@@ -184,7 +186,7 @@ def narrate(question: str, df: pd.DataFrame, llm: LLMClient) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# chart — deterministic Tier-2 generic renderer (Tier-3 LLM-spec author is W6).
+# chart — deterministic Tier-2 generic renderer (the Tier-3 LLM-authored spec is below).
 #
 # Infers chart structure from the data SHAPE, not from hardcoded column names.
 # This generalises one class at a time rather than per-question: any
@@ -215,7 +217,7 @@ def _is_compositional(df: pd.DataFrame, value_col: str) -> bool:
 
 
 # explicit chart-type requests in the question, honored when the data fits.
-# A tiny intent layer (the full Tier-3 LLM-spec author is W6); generalises to any
+# A tiny intent layer (the full Tier-3 LLM-authored spec is below); generalises to any
 # "用饼图/柱状图/折线图/面积图展示…" phrasing, not one hard-coded question.
 # order matters: 'area' is checked before 'line' so "堆叠折线图" → stacked area
 # (it contains both 堆叠 and 折线; the 堆叠 intent wins).
@@ -237,7 +239,7 @@ def _requested_chart(text: str) -> str | None:
 
 
 # in-place chart edits ("改成红色" / "换柱状图") — applied to the SAME data with
-# no re-query / no LLM call, so the demo feels like Genie's live tweaking.
+# no re-query / no LLM call, so edits feel instant (Genie-style live tweaking).
 _COLOR_MAP = {
     "红色": "red", "红": "red", "蓝色": "blue", "蓝": "blue", "绿色": "green", "绿": "green",
     "橙色": "orange", "橙": "orange", "黄色": "gold", "黄": "gold", "紫色": "purple", "紫": "purple",
@@ -357,7 +359,7 @@ def build_chart(df: pd.DataFrame, title: str, *,
 
 
 # --------------------------------------------------------------------------- #
-# Tier-3 — LLM-authored declarative chart spec (blueprint §7, D10).
+# Tier-3 — LLM-authored declarative chart spec.
 #
 # The LLM emits a constrained JSON spec (chart type + column encodings), NOT
 # rendering code; we validate it against the actual result columns and render it

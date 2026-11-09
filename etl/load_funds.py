@@ -1,11 +1,11 @@
 """
-W3 step 1 — dim_fund enrichment + NAV (unit + accumulated) for the universe.
+ETL step 1 — dim_fund enrichment + NAV (unit + accumulated) for the universe.
 
-Supersedes the W2 load_nav.py (3 funds, unit-only). Pulls real metadata
-(inception / type) from 雪球 basic-info and both NAV series from 东财.
+Supersedes the skeleton load_nav.py (3 funds, unit-only). Pulls real metadata
+(inception / type) from Xueqiu (雪球) basic-info and both NAV series from Eastmoney (东财).
 Robust per-fund: a bad code warns and is skipped, never crashes the batch.
 
-Run:  .venv/Scripts/python.exe etl/load_funds.py
+Run:  python etl/load_funds.py
 """
 from __future__ import annotations
 

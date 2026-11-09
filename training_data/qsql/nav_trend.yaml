@@ -1,9 +1,10 @@
-# Core-ring Q-SQL — 多基金净值对比（今年以来）。
+# Core-ring Q-SQL — multi-fund NAV comparison (year to date).
 #
-# LESSON (anti-precedence): 多个基金名用 OR 组合时【必须加括号】，再 AND 日期等
-# 共享条件——否则 SQL 中 AND 优先级高于 OR，日期过滤只会绑定到最后一个名字，
-# 其余基金返回全历史（实测漏括号会从今年以来 285 行膨胀到 7876 行、回溯到 2001）。
-# 已执行核对：3 只基金、今年以来 285 行、日期 2026-01-05 → 2026-05-29。
+# LESSON (operator precedence): when several fund names are combined with OR they MUST
+# be parenthesised before the shared AND conditions (dates etc.). Otherwise AND binds
+# tighter than OR, the date filter applies only to the last name, and the other funds
+# return their full history (observed: 285 YTD rows ballooned to 7,876 rows back to 2001).
+# Verified: 3 funds, 285 YTD rows, 2026-01-05 → 2026-05-29.
 
 - id: nav_compare_multi
   question: 对比易方达蓝筹精选、华夏成长和兴全合润今年以来的单位净值走势

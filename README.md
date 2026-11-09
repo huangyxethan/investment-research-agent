@@ -6,12 +6,13 @@ SQL against a live schema, validates it through deterministic safety rails,
 executes it, and returns a short Chinese narrative, a Plotly chart, the generated
 SQL, and the raw result table.
 
-This is an internship/demo project written with production-oriented engineering
-boundaries: ETL, schema, SQL safety, role-gated UI, and evaluation are kept as
-separate, independently runnable layers.
+The system is built with production-oriented boundaries: ETL, schema, SQL
+safety, role-gated UI, and evaluation are separate, independently runnable
+layers, so each can be tested, replaced, or scaled on its own.
 
 ## Table of Contents
 
+- [Design Principles](#design-principles)
 - [Current Scope](#current-scope)
 - [Architecture](#architecture)
 - [Tech Stack](#tech-stack)
@@ -27,6 +28,24 @@ separate, independently runnable layers.
 - [Security Model](#security-model)
 - [Known Limitations](#known-limitations)
 - [License](#license)
+
+## Design Principles
+
+- **Semantic layer over prompt patches.** Recurring failure classes are fixed
+  with views, whitelisted functions, and precomputed metric tables, not with
+  longer prompts.
+- **Deterministic safety in front of the LLM.** Generated SQL is parsed with
+  `sqlglot` and must be a single read-only `SELECT` over whitelisted relations
+  before it touches the database.
+- **One verified calculation convention.** Returns, volatility, Sharpe, and
+  drawdown are computed once in ETL with documented definitions, so the agent
+  reads metrics instead of re-deriving them.
+- **Evaluation-driven iteration.** Regression, chart-shape, latency, and stress
+  suites tag results by capability, so weaknesses are visible and fixes are
+  targeted.
+- **Chinese-first product, English code.** Identifiers are English; schema
+  comments, prompts, and the UI are Chinese because the LLM grounds on the
+  comments and users ask in Chinese.
 
 ## Current Scope
 
@@ -44,7 +63,7 @@ separate, independently runnable layers.
 - Streamlit frontend with `admin` / `viewer` role-based output.
 - NL2SQL, chart, latency, and multi-dimension stress evaluation scripts.
 
-**Designed but not yet populated / fully wired:**
+**Designed, not yet populated or wired:**
 
 - Vanna + pgvector RAG retrieval of Q-SQL examples.
 - Brinson attribution, RBSA factor exposure, convertible bond, futures,
@@ -116,7 +135,9 @@ docker-compose.yml     Local PostgreSQL + pgvector service
 
 - Docker Desktop (for the local PostgreSQL + pgvector container).
 - Python 3.10 or newer.
-- A shell — examples below use Windows PowerShell; adapt paths for macOS/Linux.
+- Commands below are shell-neutral. Activate the virtual environment with
+  `source .venv/bin/activate` on macOS/Linux or `.venv\Scripts\activate` on
+  Windows before running them.
 - At least one LLM API key:
   - `DEEPSEEK_API_KEY` — default/bulk NL2SQL.
   - `ANTHROPIC_API_KEY` — Claude (primary tier + chart-spec authoring).
@@ -125,8 +146,8 @@ docker-compose.yml     Local PostgreSQL + pgvector service
 
 Create a local environment file from the template:
 
-```powershell
-Copy-Item .env.example .env
+```bash
+cp .env.example .env
 ```
 
 Then fill it in. The variables map directly to
@@ -156,14 +177,14 @@ selects which backend `agent.clients.default_client()` instantiates.
 
 For the Streamlit app, create a local secrets file from its example:
 
-```powershell
-Copy-Item .streamlit\secrets.toml.example .streamlit\secrets.toml
+```bash
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
 ```
 
 Generate password hashes for the login accounts with:
 
-```powershell
-.venv\Scripts\python.exe scripts\gen_password_hash.py <admin-password> <viewer-password>
+```bash
+python scripts/gen_password_hash.py <admin-password> <viewer-password>
 ```
 
 > **Never commit `.env` or `.streamlit/secrets.toml`.** Both are git-ignored.
@@ -173,28 +194,28 @@ Generate password hashes for the login accounts with:
 **1. Start PostgreSQL.** On first boot, Docker mounts `sql/schema.sql` into
 `/docker-entrypoint-initdb.d/`, so the schema is created automatically:
 
-```powershell
+```bash
 docker compose up -d postgres
 ```
 
 **2. Create and activate a virtual environment:**
 
-```powershell
+```bash
 python -m venv .venv
-.venv\Scripts\activate
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 ```
 
 **3. Install dependencies.** The app runtime is kept slim (no torch/akshare) so
 Streamlit Cloud builds fast; heavier ETL/ML/dev deps are separate:
 
-```powershell
+```bash
 pip install -r requirements.txt        # app runtime
 pip install -r requirements-etl.txt    # only when loading/refreshing data
 ```
 
 **4. Verify the schema:**
 
-```powershell
+```bash
 docker exec invest_pg psql -U postgres -d invest -c "\dt"
 ```
 
@@ -202,9 +223,9 @@ docker exec invest_pg psql -U postgres -d invest -c "\dt"
 
 If the database is already loaded, the shortest path to the web UI is:
 
-```powershell
+```bash
 docker compose up -d postgres
-.venv\Scripts\streamlit.exe run web/app.py
+streamlit run web/app.py
 ```
 
 Then open <http://localhost:8501>. The app requires `.streamlit/secrets.toml`
@@ -218,32 +239,32 @@ steps first.
 
 Run the ETL pipeline in this order (module form, from the repo root):
 
-```powershell
-.venv\Scripts\python.exe -m etl.build_universe       # fund universe → fund_universe.csv
-.venv\Scripts\python.exe etl/load_funds.py           # dim_fund + fact_nav
-.venv\Scripts\python.exe etl/load_managers.py        # manager mappings
-.venv\Scripts\python.exe etl/load_holdings.py        # fact_holding + dim_security stocks
-.venv\Scripts\python.exe etl/load_sw_industry.py     # dim_security.industry_l1 / _l2
-.venv\Scripts\python.exe -m etl.compute_fund_perf    # YTD/1Y/3Y/SI → fact_fund_perf
-.venv\Scripts\python.exe -m etl.data_quality         # post-load quality checks
+```bash
+python -m etl.build_universe       # fund universe → fund_universe.csv
+python etl/load_funds.py           # dim_fund + fact_nav
+python etl/load_managers.py        # manager mappings
+python etl/load_holdings.py        # fact_holding + dim_security stocks
+python etl/load_sw_industry.py     # dim_security.industry_l1 / _l2
+python -m etl.compute_fund_perf    # YTD/1Y/3Y/SI → fact_fund_perf
+python -m etl.data_quality         # post-load quality checks
 ```
 
 **Universe maintenance (optional).** The fund universe can be cleaned and grown
 without re-introducing share-class duplicates (e.g. the A/C/E/I shares of one
 fund):
 
-```powershell
-.venv\Scripts\python.exe -m etl.dedup_universe --dry-run   # analyze share-class dupes
-.venv\Scripts\python.exe -m etl.dedup_universe --apply     # prune DB + CSV
-.venv\Scripts\python.exe -m etl.expand_universe            # grow universe, delta codes
+```bash
+python -m etl.dedup_universe --dry-run   # analyze share-class dupes
+python -m etl.dedup_universe --apply     # prune DB + CSV
+python -m etl.expand_universe            # grow universe, delta codes
 ```
 
 ## Running the Application
 
 ### Web app
 
-```powershell
-.venv\Scripts\streamlit.exe run web/app.py
+```bash
+streamlit run web/app.py
 ```
 
 Served at <http://localhost:8501>. Output is role-gated:
@@ -255,8 +276,8 @@ Served at <http://localhost:8501>. Output is role-gated:
 
 Run the full pipeline against a single question and print each stage:
 
-```powershell
-.venv\Scripts\python.exe -m agent.pipeline "易方达蓝筹精选今年的单位净值走势"
+```bash
+python -m agent.pipeline "易方达蓝筹精选今年的单位净值走势"   # "YTD unit-NAV trend of E Fund Blue Chip Select"
 ```
 
 This prints the generated SQL, row count, a result sample, the narrative, and
@@ -264,24 +285,25 @@ the chart build status.
 
 ## Evaluation
 
-```powershell
-.venv\Scripts\python.exe -m eval.run_eval    # NL2SQL regression over eval/cases.yaml
-.venv\Scripts\python.exe -m eval.charts      # deterministic chart regression
-.venv\Scripts\python.exe -m eval.perf        # per-stage latency profile (--repeat N)
-.venv\Scripts\python.exe -m eval.stress      # multi-dimension stress over hard joins
-.venv\Scripts\python.exe -m etl.data_quality # data-quality checks
+```bash
+python -m eval.run_eval    # NL2SQL regression over eval/cases.yaml
+python -m eval.charts      # deterministic chart regression
+python -m eval.perf        # per-stage latency profile (--repeat N)
+python -m eval.stress      # multi-dimension stress over hard joins
+python -m etl.data_quality # data-quality checks
 ```
 
 - **`run_eval`** — NL2SQL correctness against curated cases.
 - **`perf`** — runs the full `ask()` pipeline and breaks latency down into
   LLM / DB / local stages, answering "where does the time go".
-- **`stress`** — drives hard, multi-table-join questions tagged by 口径
-  dimension, classifies each outcome (OK / EMPTY / EXEC_FAIL / GEN_FAIL /
-  VALUE_FAIL), and reports per dimension to surface the weakest capability.
+- **`stress`** — drives hard, multi-table-join questions tagged by scope
+  dimension (metric, company, performance, industry, cross-table), classifies
+  each outcome (OK / EMPTY / EXEC_FAIL / GEN_FAIL / VALUE_FAIL), and reports
+  per dimension to surface the weakest capability.
 
 ## Deployment
 
-The recommended low-cost demo path uses **Streamlit Community Cloud** (hosts
+The recommended low-cost hosting path uses **Streamlit Community Cloud** (hosts
 `web/app.py`) + **Neon** (hosted PostgreSQL with pgvector) +
 **streamlit-authenticator** (login + the two roles). All data is public, so
 there is no proprietary-data exposure.
@@ -299,7 +321,7 @@ Neon supports pgvector by default — nothing extra to enable.
 dump and restore entirely inside the container to avoid host-side `psql`/encoding
 issues (replace `<NEON_URL>`):
 
-```powershell
+```bash
 docker exec invest_pg sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-privileges | psql "<NEON_URL>"'
 docker exec invest_pg psql "<NEON_URL>" -c "SELECT count(*) FROM dim_fund;"   # spot check
 ```
@@ -308,8 +330,8 @@ Re-run this step whenever you refresh local data and want it reflected online.
 
 **3. Generate password hashes** for the login accounts:
 
-```powershell
-.venv\Scripts\python.exe scripts\gen_password_hash.py <admin-password> <viewer-password>
+```bash
+python scripts/gen_password_hash.py <admin-password> <viewer-password>
 ```
 
 Copy the two `$2b$...` hashes (never commit plaintext passwords).
@@ -354,7 +376,7 @@ Copy the two `$2b$...` hashes (never commit plaintext passwords).
 - **Dependencies** — Cloud uses `requirements.txt`; local data/ETL work uses
   `requirements-etl.txt` (akshare/dagster/torch, etc.).
 - **Free tier** sleeps when idle (a few seconds of cold start on next visit),
-  which is fine for occasional review; move to a paid Render/Railway tier for
+  which is acceptable for light use; move to a paid Render/Railway tier for
   frequent use.
 - **Future** — swapping the frontend for FastAPI + React reuses Neon, accounts,
   secrets, and platform; only the UI layer changes, since `agent/` stays
@@ -389,4 +411,4 @@ and manual review.
 
 ## License
 
-No license has been specified for this repository.
+Released under the [MIT License](LICENSE).

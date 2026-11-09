@@ -8,7 +8,7 @@ Why separate: the renderer's job is to map a result's shape to the right chart
 breakdowns). That mapping must generalise across questions, so we pin it with
 fixed SQL → fixed expected chart kind — no eyeball-debugging per question.
 
-Run:  .venv/Scripts/python.exe -m eval.charts
+Run:  python -m eval.charts
 """
 from __future__ import annotations
 

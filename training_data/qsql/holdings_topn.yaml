@@ -1,8 +1,9 @@
-# Core-ring Q-SQL — 前N大持仓 via v_fund_top_holdings.holding_rank.
+# Core-ring Q-SQL — top-N holdings via v_fund_top_holdings.holding_rank.
 #
 # ANTI-POISONING: executed & inspected (蓝筹 latest top-5 = 腾讯/茅台/五粮液/阿里/
-# 汾酒; 成立以来每期前十大 = 8 期、并集18只). "前N大" = holding_rank<=N, NOT a
-# weight threshold; 历年/成立以来 = drop is_latest (time series, stackable).
+# 汾酒; every top-10 since inception = 8 periods, 18 distinct names). "前N大" (top N)
+# = holding_rank<=N, NOT a weight threshold; 历年/成立以来 (over the years / since
+# inception) = drop is_latest (time series, stackable).
 
 - id: top10_timeseries
   question: 易方达蓝筹精选成立以来每期前十大重仓股

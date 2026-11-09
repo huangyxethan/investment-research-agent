@@ -1,6 +1,6 @@
 """
-W4/hot-path — pre-compute fact_fund_perf (blueprint §8): return / sharpe /
-drawdown / volatility per fund per period, with ONE verified 口径.
+Hot path — pre-compute fact_fund_perf: return / sharpe / drawdown / volatility
+per fund per period, with ONE verified calculation convention.
 
 This kills the "let the LLM derive metrics each time" failure class: the agent
 answers metric questions with a trivial SELECT from this table instead of
@@ -15,7 +15,7 @@ Definitions (documented so they're defensible):
   * max_drawdown = max peak-to-trough decline on acc_nav (stored positive).
   * Periods: YTD, 1Y, 3Y, SI (since inception). as_of = latest nav_date.
 
-Run:  .venv/Scripts/python.exe -m etl.compute_fund_perf
+Run:  python -m etl.compute_fund_perf
 """
 from __future__ import annotations
 
@@ -108,7 +108,7 @@ def main() -> int:
         cur.execute("SELECT total_return FROM fact_fund_perf WHERE fund_code='005827' AND period='SI';")
         si = float(cur.fetchone()[0])
         print(f"[verify] 005827 SI total_return = {si:.4f}  (expected ≈ 0.60)")
-        assert 0.55 < si < 0.65, f"SI return {si} off — check 口径!"
+        assert 0.55 < si < 0.65, f"SI return {si} off — check the return convention!"
         print("[verify] OK ✓")
     return 0
 

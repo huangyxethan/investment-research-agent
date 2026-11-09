@@ -1,4 +1,4 @@
-# NL2SQL evaluation set (blueprint §15). The yardstick for generalization:
+# NL2SQL evaluation set. The yardstick for generalization:
 # deliberately includes PARAPHRASES and held-out variations of the same intent,
 # so a rising score means the agent generalizes — not that we memorised prompts.
 #

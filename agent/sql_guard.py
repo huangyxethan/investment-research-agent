@@ -1,5 +1,5 @@
 """
-SQL safety rails (blueprint §6.4) — deterministic AST validation via sqlglot.
+SQL safety rails — deterministic AST validation via sqlglot.
 
 Belt-and-braces in front of the read-only DB role: reject anything that is not
 a single read-only SELECT over whitelisted dim_*/fact_*/bridge_* tables, and
@@ -12,7 +12,7 @@ from sqlglot import exp
 
 ALLOWED_PREFIXES = ("dim_", "fact_", "bridge_", "v_")  # v_ = semantic-layer views
 # Whitelisted set-returning semantic-layer functions (e.g. arbitrary-range metrics
-# computed from fact_nav with the one verified 口径). Callable in FROM/LATERAL or a
+# computed from fact_nav with the one verified convention). Callable in FROM/LATERAL or a
 # scalar subquery; anything else in a table position is rejected.
 ALLOWED_FUNCTIONS = ("f_fund_perf_range",)
 DEFAULT_LIMIT = 10_000

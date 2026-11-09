@@ -1,12 +1,12 @@
 """
-W2 step 1 — minimal NAV ETL (walking skeleton).
+Minimal NAV ETL (walking skeleton).
 
 Loads a few funds' unit-NAV history from akshare into dim_fund + fact_nav.
-Deliberately tiny; the real ETL (Dagster assets, full universe, data-quality
-checks) is W3. Purpose here: prove the akshare -> transform -> Postgres path
+Deliberately tiny; the full ETL lives in load_funds.py and its siblings. Purpose
+here: prove the akshare -> transform -> Postgres path
 end-to-end, including the 日增长率 ÷100 conversion and partition routing.
 
-Run:  .venv/Scripts/python.exe etl/load_nav.py
+Run:  python etl/load_nav.py
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# code -> (name, type). Hardcoded for the skeleton; W3 pulls these from akshare.
+# code -> (name, type). Hardcoded for the skeleton; load_funds.py pulls these from akshare.
 FUNDS = {
     "005827": ("易方达蓝筹精选", "混合型"),
     "110011": ("易方达优质精选", "混合型"),
@@ -65,7 +65,7 @@ def main() -> int:
             )
             print(f"  {code} {name}: {len(rows)} NAV rows")
             total += len(rows)
-        # Backfill inception_date from earliest NAV (proxy; W3 pulls the real value).
+        # Backfill inception_date from earliest NAV (proxy; load_funds.py pulls the real value).
         cur.execute(
             """UPDATE dim_fund d
                SET inception_date = s.mn

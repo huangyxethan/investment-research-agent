@@ -1,5 +1,5 @@
 """
-W3+ step — populate dim_security.industry_l1 / industry_l2 with 申万 (Shenwan)
+ETL step 4 — populate dim_security.industry_l1 / industry_l2 with 申万 (Shenwan)
 一级/二级 industry classification.
 
 Source decision (see retired etl/explore_sw_industry* probes):
@@ -25,7 +25,7 @@ reproducibility / offline ETL). Use --refresh to re-fetch both from legulegu.
 
 ETL order: ... -> load_holdings (creates dim_security rows) -> load_sw_industry.
 
-Run:  .venv/Scripts/python.exe etl/load_sw_industry.py [--refresh]
+Run:  python etl/load_sw_industry.py [--refresh]
 """
 from __future__ import annotations
 

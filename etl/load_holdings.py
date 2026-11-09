@@ -1,16 +1,16 @@
 """
-W3 step 3 — fact_holding + dim_security (the Brinson input).
+ETL step 3 — fact_holding + dim_security (the Brinson input).
 
 Source: ak.fund_portfolio_hold_em(symbol, date=<year>) returns all of a year's
 disclosed equity holdings; the 季度 string tags each report. Mapping:
   1季度 -> 03-31 (top-10)   2季度/中报 -> 06-30 (FULL)
   3季度 -> 09-30 (top-10)   4季度/年报 -> 12-31 (FULL)
-is_full_holding = quarter in {2, 4}; our Brinson口径 uses only the full ones.
+is_full_holding = quarter in {2, 4}; our Brinson convention uses only the full ones.
 
 Industry (申万) is left NULL here and filled by a later step. HK holdings
 (5-digit codes like 00700) come through too; flag for industry coverage.
 
-Run:  .venv/Scripts/python.exe etl/load_holdings.py
+Run:  python etl/load_holdings.py
 """
 from __future__ import annotations
 

@@ -1,12 +1,12 @@
 """
-Latency profiler (leader feedback B2: "返回速度多少 / 时间花在哪里").
+Latency profiler: how long does a question take, and where does the time go?
 
 Runs the FULL ask() pipeline over a small representative question set and prints a
-per-stage breakdown so we can say, on stage, exactly where the ~seconds go. Stages
+per-stage breakdown so we can say exactly where the seconds go. Stages
 are grouped into LLM (sql_gen + narrate + chart_spec), DB (schema + db_exec) and
-LOCAL (chart_render) — the headline answer to "慢在哪".
+LOCAL (chart_render) — the headline answer to "what is slow".
 
-Run:  .venv/Scripts/python.exe -m eval.perf [--repeat N]
+Run:  python -m eval.perf [--repeat N]
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import statistics
 
 from agent.pipeline import ask
 
-# representative across chart types & 口径 (nav / metric / industry-L1 / industry-L2 /
+# representative across chart types and scopes (nav / metric / industry-L1 / industry-L2 /
 # manager / cross-table) so the mix mirrors real usage.
 QUESTIONS = [
     "易方达蓝筹精选今年的单位净值走势",
@@ -28,9 +28,9 @@ QUESTIONS = [
 
 STAGES = ["schema", "sql_gen", "db_exec", "narrate", "chart_spec", "chart_render"]
 GROUPS = {
-    "LLM   (生成SQL+解读+图表spec)": ["sql_gen", "narrate", "chart_spec"],
-    "DB    (读schema+执行查询)":     ["schema", "db_exec"],
-    "LOCAL (图表渲染)":              ["chart_render"],
+    "LLM   (sql_gen + narrate + chart_spec)": ["sql_gen", "narrate", "chart_spec"],
+    "DB    (schema + db_exec)":     ["schema", "db_exec"],
+    "LOCAL (chart_render)":              ["chart_render"],
 }
 
 

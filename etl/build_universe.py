@@ -1,11 +1,11 @@
 """
-Build/refresh the fund universe CSV: pull open-end 混合型 + 股票型 funds from
+Build/refresh the fund universe CSV: pull open-end mixed (混合型) and equity (股票型) funds from
 akshare, union with the curated HERO set, write etl/fund_universe.csv.
 
 Volume over curation here — the point is scaling 12 -> 100+ funds of the same
 data types. HERO funds stay guaranteed. Re-run to refresh the universe.
 
-Run:  .venv/Scripts/python.exe -m etl.build_universe
+Run:  python -m etl.build_universe
 """
 from __future__ import annotations
 

@@ -1,13 +1,13 @@
 """
-W3 step 2 — dim_manager + bridge_fund_manager (current managers of the universe).
+ETL step 2 — dim_manager + bridge_fund_manager (current managers of the universe).
 
 Source: ak.fund_manager_em() — a current manager->fund mapping. It carries NO
 manager id and NO per-fund tenure start, so:
-  * manager_id is synthesised as "公司:姓名" (stable, collision-safe enough).
+  * manager_id is synthesised as "<company>:<name>" (stable, collision-safe enough).
   * bridge.start_date uses the fund inception as a PROXY (real tenure history /
     SCD2 needs a better source — deferred). is_current = true for all rows here.
 
-Run:  .venv/Scripts/python.exe etl/load_managers.py
+Run:  python etl/load_managers.py
 """
 from __future__ import annotations
 

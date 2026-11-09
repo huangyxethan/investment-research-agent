@@ -1,12 +1,12 @@
-# Multi-dimensional STRESS battery (leader feedback C-3/C-4: probe stability of
-# complex, multi-table-join queries across 口径 dimensions). This is the
+# Multi-dimensional STRESS battery: probe the stability of complex,
+# multi-table-join queries across scope dimensions. This is the
 # CANDIDATE tier — execution/shape-classified, NOT a value oracle. The gold
 # value-checked set stays in cases.yaml; here we measure whether the agent can
 # STABLY turn a hard cross-table question into executable, non-empty SQL, and we
-# tag by dimension so we see WHICH 口径 is weak.
+# tag by dimension so we see WHICH scope is weak.
 #
 # fields:
-#   dim        -> 口径 bucket: metric|company|perf|industry|cross
+#   dim        -> scope bucket: metric|company|perf|industry|cross
 #   min_tables -> base tables/views the correct SQL should touch (stress.py
 #                 counts the agent's actual join depth against this)
 #   question   -> the NL question

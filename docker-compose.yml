@@ -1,7 +1,7 @@
-# Walking-skeleton compose: only Postgres+pgvector is active for W1.
+# Local stack: only Postgres + pgvector is needed today.
 # schema.sql auto-applies on first boot via /docker-entrypoint-initdb.d.
-# The dagster / agent-api / frontend services are added in W2+ once their
-# Dockerfiles are real (kept out now so `docker compose up` works clean).
+# Dagster / agent-api / frontend services can be added once their Dockerfiles
+# exist (kept out for now so `docker compose up` works clean).
 
 services:
   postgres:
@@ -23,7 +23,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # --- added in W2+ ---
+  # --- future services ---
   # dagster:    { build: ./etl,   depends_on: { postgres: { condition: service_healthy } } }
   # agent-api:  { build: ./agent, depends_on: { postgres: { condition: service_healthy } } }
   # frontend:   { build: ./web,   ports: ["8501:8501"], depends_on: [agent-api] }

@@ -1,7 +1,7 @@
 -- =====================================================================
 -- Investment Research Agent — Operational + Embedding Schema (v3.0)
 -- =====================================================================
--- Modelling rules (blueprint §5.5):
+-- Modelling rules:
 --   * English identifiers, Chinese COMMENT (ASCII stabilises LLM SQL gen;
 --     comments carry business meaning to the RAG retriever).
 --   * All PK / FK declared so the agent can infer joins.
@@ -9,7 +9,7 @@
 --     multi-tenancy seam.
 --   * Heavy metrics pre-computed into fact_* (hot path).
 --   * fact_trade is intentionally ABSENT in V1 (公募 funds do not disclose
---     trade-level data publicly) — see blueprint §16 item 11.
+--     trade-level data publicly).
 --
 -- This file is mounted into the Postgres container's
 -- /docker-entrypoint-initdb.d so it runs automatically on first boot.
@@ -153,7 +153,7 @@ CREATE TABLE IF NOT EXISTS fact_holding (
 COMMENT ON TABLE  fact_holding                 IS '基金持仓明细。季报仅前十大重仓股；半年报/年报为全持仓';
 COMMENT ON COLUMN fact_holding.is_full_holding IS 'true=全持仓(半年报/年报)，Brinson 仅使用全持仓';
 
--- fact_nav is RANGE-partitioned by year (blueprint §5.5). The partition
+-- fact_nav is RANGE-partitioned by year. The partition
 -- key (nav_date) must be part of the PK.
 CREATE TABLE IF NOT EXISTS fact_nav (
     workspace_id text NOT NULL DEFAULT 'default',
@@ -509,7 +509,7 @@ COMMENT ON TABLE fact_futures_holding IS '基金期货持仓（公开披露稀�
 -- 6. EMBEDDING SCHEMA (pgvector; bge-large-zh-v1.5 → 1024 dims)
 -- =====================================================================
 -- NOTE: Vanna's PG_VectorStore may manage its own collection tables.
--- These are declared per blueprint §3; reconcile with Vanna wiring in W2.
+-- Declared ahead of the retriever wiring; reconcile when Vanna is connected.
 
 CREATE TABLE IF NOT EXISTS ddl_embeddings (
     id         bigserial PRIMARY KEY,

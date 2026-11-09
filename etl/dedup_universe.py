@@ -1,12 +1,12 @@
 """
-Deduplicate share classes of the same fund (A/C/E/I ...). 公募 funds list the
-SAME underlying fund under several 份额 codes (e.g. 财通成长优选混合A 001480 /
+Deduplicate share classes of the same fund (A/C/E/I ...). Chinese public funds (公募) list the
+SAME underlying fund under several share-class (份额) codes (e.g. 财通成长优选混合A 001480 /
 财通成长优选混合C 021528). For research we want ONE row per fund.
 
 There is no clean 'share class' field, so we group by a NORMALIZED base name
 (strip the trailing latin class letter) and keep one survivor per group:
   1) a HERO fund if the group contains one (curated, never dropped)
-  2) else the class whose name ends in 'A' (前端主份额, usually原始/规模最大)
+  2) else the class whose name ends in 'A' (the primary share class, usually the original and largest)
   3) else the class with the LONGEST nav history (most fact_nav rows)
 tie-break: more nav rows, then smaller fund_code.
 
@@ -14,8 +14,8 @@ tie-break: more nav rows, then smaller fund_code.
 can avoid re-introducing dupes.
 
 Usage:
-  .venv/Scripts/python.exe -m etl.dedup_universe --dry-run   # analysis only
-  .venv/Scripts/python.exe -m etl.dedup_universe --apply      # prune DB + CSV
+  python -m etl.dedup_universe --dry-run   # analysis only
+  python -m etl.dedup_universe --apply      # prune DB + CSV
 """
 from __future__ import annotations
 

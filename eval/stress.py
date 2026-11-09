@@ -1,8 +1,8 @@
 """
-Multi-dimensional STRESS runner (leader feedback B1 / C-3 / C-4 / C-5).
+Multi-dimensional STRESS runner.
 
 Drives the REAL agent pipeline (generate_sql -> sql_guard -> run_sql) over a bank
-of hard, multi-table-join questions tagged by 口径 dimension, then classifies each
+of hard, multi-table-join questions tagged by scope dimension, then classifies each
 outcome and reports by dimension so we can SEE which capability is weak and feed
 targeted, semantic-layer fixes (not prompt patches).
 
@@ -10,14 +10,14 @@ Outcome classes per question:
   OK         executed, non-empty result
   EMPTY      executed but 0 rows (likely wrong routing / over-strict filter)
   EXEC_FAIL  SQL generated but errored at the DB (hallucinated col / wrong view /
-             broken join) — the multi-table instability the leader asked us to probe
+             broken join) — the multi-table instability this battery exists to probe
   GEN_FAIL   no SQL produced or sql_guard rejected it
   VALUE_FAIL executed & non-empty but an `expect` substring was missing
 
 Also measures, per question: actual join depth (distinct tables/views in the SQL,
-via sqlglot) vs the expected min_tables, and LLM+DB latency (doubles as a B2 probe).
+via sqlglot) vs the expected min_tables, and LLM+DB latency (doubles as a latency probe).
 
-Run:  .venv/Scripts/python.exe -m eval.stress
+Run:  python -m eval.stress
 """
 from __future__ import annotations
 

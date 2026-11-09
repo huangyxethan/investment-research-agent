@@ -5,7 +5,7 @@ Scores SQL generation + execution only (no narrative/chart) to stay cheap and
 focused. Failures print their generated SQL so we can see PATTERNS to fix in the
 semantic layer — not one-off prompt patches.
 
-Run:  .venv/Scripts/python.exe -m eval.run_eval
+Run:  python -m eval.run_eval
 """
 from __future__ import annotations
 

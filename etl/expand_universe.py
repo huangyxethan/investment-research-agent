@@ -1,6 +1,6 @@
 """
 Grow the (already share-class-deduped) universe back up to ~TARGET_TOTAL funds,
-with ~50% 易方达, WITHOUT re-introducing share-class dupes.
+with ~50% E Fund (易方达), WITHOUT re-introducing share-class dupes.
 
 - 易方达: company-filtered active equity funds from ak.fund_name_em(), deduped by
   base_name() and excluding bases already in the universe.
@@ -10,7 +10,7 @@ with ~50% 易方达, WITHOUT re-introducing share-class dupes.
 Appends new rows to fund_universe.csv and writes the NEW codes to
 etl/_new_codes.txt so the data pull can run delta-only (UNIVERSE_ONLY).
 
-Run:  .venv/Scripts/python.exe -m etl.expand_universe
+Run:  python -m etl.expand_universe
 """
 from __future__ import annotations
 
