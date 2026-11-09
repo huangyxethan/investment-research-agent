@@ -10,8 +10,33 @@ The system is built with production-oriented boundaries: ETL, schema, SQL
 safety, role-gated UI, and evaluation are separate, independently runnable
 layers, so each can be tested, replaced, or scaled on its own.
 
+## Screenshots
+
+One end-to-end answer, as the `admin` role sees it. The question compares the
+year-to-date unit-NAV paths of three funds, normalised to their first
+observation:
+
+> 对比易方达蓝筹精选、华夏成长和兴全合润今年以来的单位净值走势，初始净值归一化
+
+**Question and narrative.** The agent answers in Chinese from the actual query
+result, not from the prompt.
+
+![Question box and generated narrative](docs/screenshots/01-question-and-narrative.png)
+
+**Chart and generated SQL.** The chart is rendered from an LLM-authored spec;
+the SQL shown is exactly what passed the safety guard and ran, including the
+window function the model wrote for the normalisation.
+
+![Plotly chart and the generated SQL](docs/screenshots/02-chart-and-generated-sql.png)
+
+**Result table.** Admins also see the raw rows (285 here); viewers get a
+truncated table and no SQL.
+
+![Raw result table](docs/screenshots/03-result-table.png)
+
 ## Table of Contents
 
+- [Screenshots](#screenshots)
 - [Design Principles](#design-principles)
 - [Current Scope](#current-scope)
 - [Architecture](#architecture)

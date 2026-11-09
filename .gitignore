@@ -47,7 +47,8 @@ etl/_*.txt
 
 # Presentation / docs deliverables (kept local, not in repo)
 ppt/
-docs/
+docs/*
+!docs/screenshots/
 
 # Internal design doc — kept local, not shipped in the repo
 blueprint.md
